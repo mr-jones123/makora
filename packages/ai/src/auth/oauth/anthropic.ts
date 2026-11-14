@@ -93,6 +93,14 @@ async function postJson(url: string, body: Record<string, string | number>, sign
 	return responseBody;
 }
 
+interface AnthropicTokenResponse {
+	access_token: string;
+	refresh_token: string;
+	expires_in: number;
+	account?: { uuid?: string; email_address?: string };
+	organization?: { uuid?: string; name?: string };
+}
+
 async function exchangeAuthorizationCode(
 	code: string,
 	state: string,
@@ -120,9 +128,9 @@ async function exchangeAuthorizationCode(
 		);
 	}
 
-	let tokenData: { access_token: string; refresh_token: string; expires_in: number };
+	let tokenData: AnthropicTokenResponse;
 	try {
-		tokenData = JSON.parse(responseBody) as { access_token: string; refresh_token: string; expires_in: number };
+		tokenData = JSON.parse(responseBody) as AnthropicTokenResponse;
 	} catch (error) {
 		throw new Error(
 			`Token exchange returned invalid JSON. url=${TOKEN_URL}; body=${responseBody}; details=${formatErrorDetails(error)}`,
@@ -134,6 +142,9 @@ async function exchangeAuthorizationCode(
 		refresh: tokenData.refresh_token,
 		access: tokenData.access_token,
 		expires: Date.now() + tokenData.expires_in * 1000 - 5 * 60 * 1000,
+		// Kept so apps can tell which account and organization a login belongs to.
+		...(tokenData.account && { account: tokenData.account }),
+		...(tokenData.organization && { organization: tokenData.organization }),
 	};
 }
 
@@ -235,9 +246,10 @@ async function loginAnthropicCopyCode(interaction: ProviderAuthInteraction): Pro
 }
 
 /**
- * Refresh Anthropic OAuth token
+ * Refresh Anthropic OAuth token. Extra fields of the stored credential (account, organization) are kept: the
+ * organization a token is scoped to is fixed at login.
  */
-async function refreshAnthropicToken(refreshToken: string, signal: AbortSignal): Promise<OAuthCredential> {
+async function refreshAnthropicToken(credential: OAuthCredential, signal: AbortSignal): Promise<OAuthCredential> {
 	let responseBody: string;
 	try {
 		responseBody = await postJson(
@@ -245,7 +257,7 @@ async function refreshAnthropicToken(refreshToken: string, signal: AbortSignal):
 			{
 				grant_type: "refresh_token",
 				client_id: CLIENT_ID,
-				refresh_token: refreshToken,
+				refresh_token: credential.refresh,
 			},
 			signal,
 		);
@@ -268,6 +280,7 @@ async function refreshAnthropicToken(refreshToken: string, signal: AbortSignal):
 	}
 
 	return {
+		...credential,
 		type: "oauth",
 		refresh: data.refresh_token,
 		access: data.access_token,
@@ -299,7 +312,7 @@ export const anthropicOAuth: OAuthAuth = {
 		return loginAnthropic(interaction);
 	},
 
-	refresh: (credential, signal) => refreshAnthropicToken(credential.refresh, signal),
+	refresh: refreshAnthropicToken,
 
 	async toAuth(credential) {
 		return { apiKey: credential.access };

@@ -174,6 +174,48 @@ describe.sequential("Anthropic OAuth", () => {
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
+	it("keeps the account and organization from the token response across refresh", async () => {
+		const account = { uuid: "account-uuid", email_address: "user@example.com" };
+		const organization = { uuid: "org-uuid", name: "Example Org" };
+		let authUrl = "";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (_input: unknown, init?: RequestInit): Promise<Response> => {
+				const body = getJsonBody(init);
+				if (body.grant_type === "authorization_code") {
+					return jsonResponse({
+						access_token: "access-token",
+						refresh_token: "refresh-token",
+						expires_in: 3600,
+						account,
+						organization,
+					});
+				}
+				return jsonResponse({
+					access_token: "new-access-token",
+					refresh_token: "new-refresh-token",
+					expires_in: 3600,
+				});
+			}),
+		);
+
+		const credential = await anthropicOAuth.login({
+			signal: neverAbortedSignal,
+			notify: (event) => {
+				if (event.type === "auth_url") authUrl = event.url;
+			},
+			prompt: async (prompt) =>
+				prompt.type === "select" ? "copy_code" : `copied-code#${new URL(authUrl).searchParams.get("state")}`,
+		});
+		expect(credential.account).toEqual(account);
+		expect(credential.organization).toEqual(organization);
+
+		const refreshed = await anthropicOAuth.refresh(credential, neverAbortedSignal);
+		expect(refreshed.access).toBe("new-access-token");
+		expect(refreshed.account).toEqual(account);
+		expect(refreshed.organization).toEqual(organization);
+	});
+
 	it("anthropicOAuth.login resolves through the manual_code prompt and aborts it after settling", async () => {
 		const fetchMock = vi.fn(async (input: unknown): Promise<Response> => {
 			const url = typeof input === "string" ? input : String(input);

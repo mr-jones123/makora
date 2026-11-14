@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Anthropic OAuth credentials now keep the `account` (uuid, email) and `organization` (uuid, name) objects from the token response, preserved across refresh, so apps can tell which account a login belongs to
+- `PI_AI_CLAUDE_CODE_VERSION` overrides the Claude Code version sent in the user agent of Anthropic OAuth requests
+
 ### Changed
 
 - Anthropic message threads are now on by default for any provider whose baseUrl is on api.anthropic.com, not only the `anthropic` provider ([#11987](https://github.com/earendil-works/pi/issues/11987))
