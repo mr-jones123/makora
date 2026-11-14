@@ -1,0 +1,33 @@
+{
+	"name": "makora",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"bin": {
+		"makora": "bin/makora.mjs"
+	},
+	"scripts": {
+		"start": "node --import ./src/source.ts src/main.ts",
+		"check": "node ../../scripts/biome-check.mjs && tsc --noEmit",
+		"format": "node ../../scripts/biome-check.mjs --write",
+		"test": "node --import ./src/source.ts --test --test-concurrency=1 test/**/*.test.ts",
+		"skills": "node scripts/sync-skills.mjs"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"dependencies": {
+		"@earendil-works/chord": "1.5.2",
+		"@earendil-works/pi-ai": "1.5.2",
+		"@earendil-works/pi-durable": "1.5.2",
+		"@earendil-works/pi-schema": "1.5.2",
+		"@earendil-works/pi-tui": "1.5.2",
+		"proper-lockfile": "4.1.2",
+		"yaml": "2.9.0"
+	},
+	"devDependencies": {
+		"@types/node": "22.19.19",
+		"@types/proper-lockfile": "4.1.4",
+		"typescript": "5.9.3"
+	}
+}

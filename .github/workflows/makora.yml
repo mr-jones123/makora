@@ -1,0 +1,55 @@
+name: makora
+
+# The root check covers packages/* only; makora has its own biome config, tsc project and tests.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/makora/**'
+      - 'packages/**'
+      - 'package-lock.json'
+      - '.github/workflows/makora.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/makora/**'
+      - 'packages/**'
+      - 'package-lock.json'
+      - '.github/workflows/makora.yml'
+
+permissions: {}
+
+concurrency:
+  group: makora-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Hydrate model data
+        run: npm run hydrate:model-data
+
+      - name: Check
+        working-directory: apps/makora
+        run: npm run check
+
+      - name: Test
+        working-directory: apps/makora
+        run: npm test
