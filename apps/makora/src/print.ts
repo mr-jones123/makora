@@ -44,7 +44,7 @@ export async function runPrint(
 			const failure = (await session.harness.snapshot(LiveDoc, session.root.id, context))?.runFailure;
 			return printer.finish(failure === undefined ? undefined : describeRunFailure(failure.reason, failure.detail));
 		}
-		const settled = await (await session.submit(prompt, context)).wait(context);
+		const settled = await (await session.submit(session.root, prompt, context)).wait(context);
 		await watch.stop();
 		await printer.catchUp(session, context);
 		if (settled.status === "done") return printer.finish(undefined);

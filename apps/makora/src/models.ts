@@ -48,6 +48,7 @@ export const FAKE_SCRIPTS: readonly { readonly keyword: string; readonly cells: 
 		],
 	},
 	{ keyword: "remember", cells: ["print(x)"] },
+	{ keyword: "bump", cells: ['x = 99\nawait write("fake.txt", "bumped")'] },
 	{ keyword: "file", cells: ['await write("fake.txt", "hi")', 'print(await read("fake.txt"))'] },
 	{ keyword: "tool", cells: ['print(await bash("echo hello; sleep 2"))'] },
 	{ keyword: "ask", cells: ['print(await llm("say hi"))'] },

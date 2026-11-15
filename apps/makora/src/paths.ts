@@ -11,6 +11,8 @@ export interface HomePaths {
 	readonly keybindings: string;
 	readonly agents: string;
 	readonly skills: string;
+	/** Fork worktrees: `<repo>-<hash>/<session>/<conversation>`. */
+	readonly worktrees: string;
 }
 
 /** Makora's home directory, absolute: `MAKORA_HOME` resolved against the cwd, or `~/.makora`. */
@@ -29,6 +31,7 @@ export function homePaths(home: string): HomePaths {
 		keybindings: join(home, "keybindings.json"),
 		agents: join(home, "AGENTS.md"),
 		skills: join(home, "skills"),
+		worktrees: join(home, "worktrees"),
 	};
 }
 

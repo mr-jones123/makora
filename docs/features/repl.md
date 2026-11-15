@@ -123,4 +123,4 @@ variable is pickled again to check it.
 ## Not yet
 
 Subagents (`spawn`, `wait_agents`) come in phase 3 ([roadmap.md](../roadmap.md)). Old blobs are never pruned yet.
-Forking a conversation does not restore that point's variables yet.
+A fork (`/fork`) restores the variables and files of its fork point ([sessions.md](sessions.md#forks)).

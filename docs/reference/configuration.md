@@ -19,6 +19,7 @@
 | `AGENTS.md` | You | Markdown instructions added to every conversation's prompt, before project AGENTS.md files |
 | `skills/<name>/SKILL.md` | You | User skills; see [features/skills.md](../features/skills.md) |
 | `sessions/<id>/` | makora | See [features/sessions.md](../features/sessions.md) |
+| `worktrees/<repo>-<hash>/<session>/<conversation>/` | `/fork`, removed by `x` in the agents view | Git worktrees of forks ([architecture/forks.md](../architecture/forks.md#the-worktree)) |
 | `python/venv/` | makora, on the first REPL cell | The Python environment kernels run in; delete it to force a rebuild ([architecture/repl.md](../architecture/repl.md#the-python-environment)) |
 
 ### `settings.json` fields
@@ -45,6 +46,7 @@ Makora's own:
 | `app.agents` | `ctrl+a` |
 | `app.model.select` | `ctrl+l` |
 | `app.diff` | `ctrl+g` |
+| `app.agents.remove` | `x`; read only in the agents view |
 
 The diff view's own keys, read only while it is open ([features/diff.md](../features/diff.md)):
 

@@ -48,8 +48,9 @@ await merge("fix-db")                                # write mode only; conflict
 | `review` | `git worktree add --detach <path> <ref>`: the commit under review, no branch | Findings | Removing the agent deletes the worktree; anything it changed is discarded |
 | `write` | New branch `makora/<session>/<name>` from `base` | Summary, branch, diff stat | `merge(name)` merges the branch into the parent's tree; conflicts come back as data. Removing the agent deletes the worktree and, unless merged, keeps the branch |
 
-Worktrees live outside the repository, at `~/.makora/worktrees/<repo>/<session>/<name>`, so tools that walk the
-project (tsc, biome, test globs, `rg`) never wander into a child's checkout.
+Worktrees live outside the repository, at `~/.makora/worktrees/<repo>-<hash>/<session>/<name>`, so tools that walk
+the project (tsc, biome, test globs, `rg`) never wander into a child's checkout. Forks already use this layout, with
+the conversation id as the name ([forks.md](forks.md#the-worktree)).
 
 A fresh worktree has no `node_modules` or untracked files such as `.env`. A project can set a setup command in
 `.makora/settings.json` (for example `npm ci --ignore-scripts`) that runs when a worktree is created.

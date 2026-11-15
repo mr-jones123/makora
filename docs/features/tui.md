@@ -9,10 +9,10 @@ Top to bottom:
 
 | Row | Shows |
 | --- | --- |
-| Top bar | `makora` · session title (the first prompt) · working directory; right: session cost and time since the session started |
+| Top bar | `makora` · the active fork's label (`fork 2`), when a fork is active · session title (the first prompt) · the active conversation's directory; right: session cost and time since the session started |
 | Transcript | Your messages (`›`), the model's answers as markdown, thinking as one muted line (`∴ thinking · …`), tool calls, notices |
-| Activity row | `◆ N running` (green when above 0) · `◌ N waiting` · `N worktrees` (always 0 until phase 3) · the Python kernel, once a cell started one (`py running 3 vars @ cell 7 45 MB`, `py dead (exit 1)` as a warning; see [repl.md](repl.md#cells-in-the-tui)) · compaction state |
-| Status row | model · thinking level · directory (git branch) · a 20-cell context gauge with `NN% of <window>`; right: the account label |
+| Activity row | `◆ N running` (green when above 0) · `◌ N waiting` · `N worktrees` (the session's fork worktrees) · the active conversation's Python kernel, once a cell started one (`py running 3 vars @ cell 7 45 MB`, `py dead (exit 1)` as a warning; see [repl.md](repl.md#cells-in-the-tui)) · compaction state |
+| Status row | the active conversation's model · thinking level · directory (git branch, or a short commit in a fork's worktree) · a 20-cell context gauge with `NN% of <window>`; right: the account label |
 | Editor | A rounded box; `/` opens command autocomplete |
 | Hint row | The main keys, read from the key bindings so remaps show; shows `press ctrl+c again to exit` after a first Ctrl+C |
 
@@ -53,11 +53,17 @@ The first message replaces the splash.
 Ctrl+A opens it; Esc returns.
 
 - Title: `Agents · N running · M done`, total cost, requests, elapsed time.
-- Left: every conversation of the session in sections RUNNING, IDLE, DONE, children indented under their owner, with
-  model, directory or worktree, cost and age. Phase 1 shows only the root; phase 3 subagents appear here without
-  changes.
-- Right: the selected agent's model, directory, cost and turns, and its recent tool calls.
-- Keys: ↑/↓ select, Enter opens (phase 1: the root only), Esc back.
+- Left: every conversation of the session in sections RUNNING, IDLE, DONE: `main` (the root), its forks by label
+  (`fork 1`) indented under the conversation they came from, and, in phase 3, subagents under their owner. Each row has
+  model, directory or worktree, cost and age. Removed forks are not listed.
+- Right: the selected agent's model, directory, for a fork where its files come from (`worktree at the fork point's
+  snapshot (82927d5)`, `worktree at HEAD (…)`, `shares the original's folder`), cost and turns, and its recent tool
+  calls.
+- Keys: ↑/↓ select; Enter makes the selected conversation the active one and returns to the main screen, where what
+  you type goes to it; `x` removes the selected fork after a confirmation, which warns when its worktree has
+  uncommitted changes (the main conversation cannot be removed); Esc back. The outcome of `x` shows in the hint row.
+
+Forks: [sessions.md](sessions.md#forks).
 
 In phase 3 this becomes the subagents dashboard (layout A): sections RUNNING, WAITING ON YOU, DONE; rows with mode,
 branch or ref, budget bar and current cell; an inspector with kernel state, budgets, recent cells and the worktree
@@ -75,6 +81,7 @@ type goes to it. Design: [architecture/subagents.md](../architecture/subagents.m
 | Ctrl+A | Agents view | `app.agents` |
 | Ctrl+L | Model picker | `app.model.select` |
 | Ctrl+G | Diff view ([diff.md](diff.md)) | `app.diff` |
+| x (agents view) | Remove the selected fork | `app.agents.remove` |
 | Home | Start of the editor line (Ctrl+A is taken by the agents view) | pi-tui editor |
 | PgUp / PgDn, Ctrl+Home / Ctrl+End | Scroll the transcript | pi-tui |
 
@@ -91,9 +98,11 @@ Every binding can be remapped in `~/.makora/keybindings.json` ([reference/config
 | `/thinking` | Choose the thinking level |
 | `/new` | Start a new session in this directory |
 | `/resume` | Resume another session |
+| `/fork` | Fork the active conversation before an earlier message, with that point's variables and files ([sessions.md](sessions.md#forks)) |
 | `/compact [instructions]` | Compact the context now |
-| `/diff` | Open the diff view: changes, staging, commit history, ask about a line ([diff.md](diff.md)) |
+| `/diff` | Open the diff view of the active conversation's directory: changes, staging, commit history, ask about a line ([diff.md](diff.md)) |
 | `/skill:<name> [args]` | Run a skill: its instructions plus your arguments become the message |
 | `/quit` | Exit |
 
-The model and thinking choices are saved in `~/.makora/settings.json` and apply to new requests immediately.
+`/model`, `/thinking` and `/compact` act on the active conversation. The model and thinking choices are also saved in
+`~/.makora/settings.json` as the default for new sessions, and apply to new requests immediately.

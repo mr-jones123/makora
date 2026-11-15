@@ -58,6 +58,7 @@ processes. Phase 4 moves sessions into worker processes behind a background serv
 | `paths.ts` | `~/.makora` and the files under it; `MAKORA_HOME` |
 | `sessions.ts` | Session directories, `meta.json`, the session list, the writer lock |
 | `session.ts` | One open session, stored or ephemeral: lock, kernels, `Harness.open`, root conversation, resume, restore notices |
+| `fork.ts` | Forks: the `makora.fork` document, fork points, creating a fork with its worktree, listing and removing forks; see [forks.md](forks.md) |
 | `settings.ts` | `settings.json`, read live (model, thinking level, `snapshots`); the harness run policy |
 | `models.ts` | Built-in providers plus the scripted fake provider and its `FAKE_SCRIPTS` |
 | `extension.ts` | The `makora` Durable extension: the REPL preamble, cwd, context files, skills |
@@ -93,12 +94,14 @@ Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` 
     lock.sqlite, lock.pid       writer lock
     blobs/sha256/…              pickled REPL variables, one file per blob
     kernels/<conversation>.pid  pid of each running kernel
+  worktrees/<repo>-<hash>/<session>/<conversation>/   a fork's git worktree (forks.md)
 <project>/.git/
   refs/makora/<session>/<conversation>   commits of the worktree's tree after each cell
+  refs/makora/<session>/forks/<conversation>   keeps a fork's starting commit alive
 ```
 
-An `--ephemeral` session writes none of `sessions/<id>/` and no refs; it still uses `python/venv/`
-([repl.md](repl.md#durability-is-optional)).
+An `--ephemeral` session writes none of `sessions/<id>/` and no refs; it still uses `python/venv/`, and a fork it makes
+gets a worktree at `HEAD` ([repl.md](repl.md#durability-is-optional), [forks.md](forks.md)).
 
 ## Changes outside apps/makora
 

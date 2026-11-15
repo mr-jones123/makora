@@ -18,6 +18,8 @@ export const MAKORA_KEYBINDINGS = {
 	"app.agents": { defaultKeys: "ctrl+a", description: "agents" },
 	"app.model.select": { defaultKeys: "ctrl+l", description: "model" },
 	"app.diff": { defaultKeys: "ctrl+g", description: "diff" },
+	// The agents view's own key; only that view reads it.
+	"app.agents.remove": { defaultKeys: "x", description: "remove fork" },
 	// The diff view's own keys; only that view reads them, so they may share keys with the editor's.
 	"app.diff.up": { defaultKeys: ["up", "k"], description: "up" },
 	"app.diff.down": { defaultKeys: ["down", "j"], description: "down" },

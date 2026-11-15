@@ -95,3 +95,10 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   without leaving makora. `a` puts the hunk with the cursor line marked into the editor, so the user can ask the agent
   about a line. The view stages, unstages and reverts, but never commits: committing stays with the agent and
   `no-mistakes`. See [features/diff.md](features/diff.md).
+- **Forks get their own worktree at the fork-point file snapshot (owner, 2026-11-16).** `/fork` makes a Durable fork
+  before an earlier message, and inside a git repository a detached worktree at a commit of the tree the newest cell
+  before the fork point captured, under `~/.makora/worktrees/<repo>-<hash>/<session>/<conversation>`. Without that
+  tree the worktree starts at `HEAD`; outside git the fork shares the folder; each case says so. A fork that shared the
+  folder would restore the fork point's variables next to the original's later files, and the two conversations would
+  overwrite each other's files. The fork reuses the worktree layout planned for subagents; merging back waits for
+  phase 3's `merge`. See [architecture/forks.md](architecture/forks.md).

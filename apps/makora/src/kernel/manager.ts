@@ -89,6 +89,15 @@ export class KernelManager {
 		for (const listener of this.#listeners) listener();
 	}
 
+	/** Stop the conversation's kernel, if one runs, and forget its status. */
+	async stop(conversationId: ConversationId): Promise<void> {
+		const kernel = await this.#kernels.get(conversationId)?.catch(() => undefined);
+		this.#kernels.delete(conversationId);
+		await kernel?.shutdown();
+		this.#status.delete(conversationId);
+		for (const listener of this.#listeners) listener();
+	}
+
 	/** Stop every kernel. */
 	async close(): Promise<void> {
 		const kernels = await Promise.all([...this.#kernels.values()].map((kernel) => kernel.catch(() => undefined)));

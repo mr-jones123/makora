@@ -1,5 +1,5 @@
-// The agents view: every conversation of the session as a row (the root and the subagents tasks own), and the
-// selected agent's details. Generic over the task graph, so subagents appear without changes here.
+// The agents view: every conversation of the session as a row (the root, its forks, and the subagents tasks own), and
+// the selected agent's details. Generic over the task graph, so subagents appear without changes here.
 import type { Context } from "@earendil-works/chord/context";
 import {
 	type ConversationId,
@@ -10,6 +10,7 @@ import {
 	UsageDoc,
 } from "@earendil-works/pi-durable";
 import { type Component, getKeybindings, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type ForkFiles, type ForkRecord, readFork } from "../fork.ts";
 import { SPINNER, type ToolCell, toolSummary } from "../tool-cell.ts";
 import { responseEnd, transcriptRows } from "../transcript-rows.ts";
 import { formatCost, formatElapsed, hintLine, spread } from "./bars.ts";
@@ -36,13 +37,18 @@ export interface AgentRow {
 	readonly lastAt: number | undefined;
 	/** Newest tool calls, oldest first, with when each started. */
 	readonly recent: readonly { readonly at: number; readonly cell: ToolCell }[];
+	/** The fork record, when the conversation is a fork. */
+	readonly fork: ForkRecord | undefined;
 }
 
 const SECTIONS: readonly AgentSection[] = ["running", "idle", "done"];
 const RECENT_CALLS = 8;
 const ENTRY_PAGE = 200;
 
-/** The agent rows of the session behind `harness`, in display order: by section, each tree depth first. */
+/**
+ * The agent rows of the session behind `harness`, in display order: by section, each tree depth first. Forks nest under
+ * the conversation they came from; removed forks are left out.
+ */
 export async function loadAgentRows(
 	harness: Harness,
 	rootId: ConversationId,
@@ -71,9 +77,10 @@ export async function loadAgentRows(
 		}),
 	);
 	const children = new Map<ConversationId | undefined, typeof details>();
-	const known = new Set(conversations.map((record) => record.id));
-	for (const detail of details) {
-		const owner = detail.record.owner?.conversationId;
+	const shown = details.filter((detail) => detail.fork?.removed !== true);
+	const known = new Set(shown.map((detail) => detail.record.id));
+	for (const detail of shown) {
+		const owner = detail.record.owner?.conversationId ?? detail.fork?.parentConversationId;
 		const parent = owner !== undefined && known.has(owner) ? owner : undefined;
 		children.set(parent, [...(children.get(parent) ?? []), detail]);
 	}
@@ -81,7 +88,7 @@ export async function loadAgentRows(
 	const visit = (detail: (typeof details)[number], depth: number, section: AgentSection): void => {
 		rows.push({
 			conversationId: detail.record.id,
-			name: detail.record.id === rootId ? "main" : `agent ${detail.record.id}`,
+			name: detail.record.id === rootId ? "main" : (detail.fork?.label ?? `agent ${detail.record.id}`),
 			section,
 			status: detail.status,
 			depth,
@@ -92,6 +99,7 @@ export async function loadAgentRows(
 			startedAt: detail.startedAt,
 			lastAt: detail.lastAt,
 			recent: detail.recent,
+			fork: detail.fork,
 		});
 		for (const child of children.get(detail.record.id) ?? []) visit(child, depth + 1, section);
 	};
@@ -102,11 +110,12 @@ export async function loadAgentRows(
 
 async function conversationDetail(harness: Harness, id: ConversationId, context: Context) {
 	const conversation = await harness.conversation(id, context);
-	const [agent, usage, newest, oldest] = await Promise.all([
+	const [agent, usage, newest, oldest, fork] = await Promise.all([
 		conversation?.agent(context),
 		harness.snapshot(UsageDoc, id, context),
 		conversation?.entries({}, ENTRY_PAGE, undefined, context),
 		conversation?.entries({ order: "ascending" }, 1, undefined, context),
+		readFork(harness, id, context),
 	]);
 	const entries = [...(newest?.items ?? [])].reverse();
 	const times = new Map<string, number>();
@@ -130,6 +139,7 @@ async function conversationDetail(harness: Harness, id: ConversationId, context:
 		startedAt: first !== undefined && first.role !== "system" ? first.timestamp : undefined,
 		lastAt: last !== undefined && last.role !== "system" ? last.timestamp : undefined,
 		recent,
+		fork,
 	};
 }
 
@@ -142,12 +152,17 @@ export interface AgentsSource {
 	readonly frame: number;
 	/** Shows a path with `~`. */
 	readonly tildify: (path: string) => string;
+	/** A message shown in place of the hint row, such as the outcome of a removal. */
+	readonly note: string | undefined;
 }
 
 /** What the agents view's keys do. */
 export interface AgentsActions {
 	move(delta: number): void;
+	/** Make the selected conversation the main screen's. */
 	open(): void;
+	/** Remove the selected fork. */
+	remove(): void;
 	back(): void;
 }
 
@@ -175,6 +190,7 @@ export class AgentsView implements Component {
 		else if (keys.matches(data, "tui.select.down")) this.#actions.move(1);
 		else if (keys.matches(data, "tui.select.confirm")) this.#actions.open();
 		else if (keys.matches(data, "tui.select.cancel")) this.#actions.back();
+		else if (keys.matches(data, "app.agents.remove")) this.#actions.remove();
 	}
 
 	/** The title row: `Agents · N running · M done`, and `$total · N req · elapsed`. */
@@ -189,14 +205,17 @@ export class AgentsView implements Component {
 		return spread(left, right, width);
 	}
 
-	/** The hint row, from the select bindings. */
+	/** The hint row, from the select bindings, or the source's note. */
 	hint(): string {
+		const { note } = this.#source();
+		if (note !== undefined) return theme.warning(note);
 		const keys = getKeybindings();
 		const first = (id: "tui.select.up" | "tui.select.down" | "tui.select.confirm" | "tui.select.cancel") =>
 			keys.getKeys(id).slice(0, 1);
 		return hintLine([
 			[[...first("tui.select.up"), ...first("tui.select.down")], "select"],
 			[first("tui.select.confirm"), "open"],
+			[keys.getKeys("app.agents.remove").slice(0, 1), "remove fork"],
 			[first("tui.select.cancel"), "back"],
 		]);
 	}
@@ -258,6 +277,7 @@ function detail(row: AgentRow, source: AgentsSource, width: number): string[] {
 		fit(theme.bold(theme.accent(row.name))),
 		fit(theme.muted(`model  ${row.model ?? "none"}`)),
 		fit(theme.muted(`cwd    ${row.cwd === undefined ? "" : source.tildify(row.cwd)}`)),
+		...(row.fork === undefined ? [] : [fit(theme.muted(`files  ${describeFiles(row.fork.files)}`))]),
 		"",
 		fit(`${theme.text(formatCost(row.costUsd))}${theme.muted(` cost · ${row.turns} turns`)}`),
 		"",
@@ -272,6 +292,17 @@ function detail(row: AgentRow, source: AgentsSource, width: number): string[] {
 		lines.push(`${theme.dim(time)} ${paint(summary.marker)} ${theme.text(summary.text)}`);
 	}
 	return lines;
+}
+
+function describeFiles(files: ForkFiles): string {
+	switch (files.kind) {
+		case "snapshot":
+			return `worktree at the fork point's snapshot (${files.commit.slice(0, 7)})`;
+		case "head":
+			return `worktree at HEAD (${files.commit.slice(0, 7)})`;
+		case "shared":
+			return "shares the original's folder";
+	}
 }
 
 function pad(text: string, width: number): string {

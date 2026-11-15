@@ -4,9 +4,11 @@ import { dirname } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
+import type { ConversationId } from "@earendil-works/pi-durable";
 import type { SlashCommand } from "@earendil-works/pi-tui";
 import type { MakoraApp } from "../app.ts";
 import { loginAccount } from "../auth/login.ts";
+import { createFork, forkPoints } from "../fork.ts";
 import { tildify } from "../paths.ts";
 import { listSessions, type SessionMeta } from "../sessions.ts";
 import { readSkillBody, type Skill } from "../skills.ts";
@@ -17,14 +19,18 @@ import type { SessionFeed } from "./session-feed.ts";
 export interface CommandHost {
 	readonly app: MakoraApp;
 	readonly dialogs: Dialogs;
-	/** The open session's feed. */
+	/** The feed of the open session's active conversation. */
 	feed(): SessionFeed;
 	info(message: string): void;
 	notice(message: string): void;
 	/** Close the open session and open `meta` (a new one when undefined). */
 	switchSession(meta: SessionMeta | undefined): Promise<void>;
-	/** Submit `text` to the open session as user input. */
+	/** Submit `text` to the active conversation as user input. */
 	submit(text: string): Promise<void>;
+	/** Make conversation `id` of the open session the active one, shown in the main screen. */
+	activate(id: ConversationId): Promise<void>;
+	/** Replace the editor's text. */
+	setEditorText(text: string): void;
 	/** Re-read the account label and the feed's derived state. */
 	refreshStatus(): void;
 	/** Show the diff view of the session's directory. */
@@ -46,6 +52,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 	thinking: { description: "Choose the thinking level", run: chooseThinking },
 	new: { description: "Start a new session in this directory", run: (host) => host.switchSession(undefined) },
 	resume: { description: "Resume another session", run: resume },
+	fork: { description: "Fork the conversation before an earlier message, with its variables and files", run: fork },
 	diff: {
 		description: "Show git changes and history; stage, revert, ask about a line",
 		run: async (host) => host.openDiff(),
@@ -53,7 +60,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 	compact: {
 		description: "Compact the context, with optional instructions",
 		run: async (host, args) => {
-			await host.feed().session.root.compact(args || undefined, BACKGROUND_CONTEXT);
+			await host.feed().conversation.compact(args || undefined, BACKGROUND_CONTEXT);
 			host.info("Compaction started.");
 		},
 	},
@@ -247,7 +254,8 @@ async function chooseModel(host: CommandHost): Promise<void> {
 	const model = available.find((candidate) => `${candidate.provider}/${candidate.id}` === choice.value)!;
 	const ref = { provider: model.provider, modelId: model.id };
 	host.app.settings.update({ model: ref });
-	await host.feed().session.setModel(ref, BACKGROUND_CONTEXT);
+	const feed = host.feed();
+	await feed.session.setModel(feed.conversation, ref, BACKGROUND_CONTEXT);
 	host.info(`Model: ${choice.value}`);
 	host.refreshStatus();
 }
@@ -264,7 +272,7 @@ async function chooseThinking(host: CommandHost, args: string): Promise<void> {
 	const chosen = named ?? MODEL_THINKING_LEVELS.find((level) => level === picked?.value);
 	if (chosen === undefined) return;
 	host.app.settings.update({ thinkingLevel: chosen });
-	await host.feed().session.root.configure({ thinkingLevel: chosen }, BACKGROUND_CONTEXT);
+	await host.feed().conversation.configure({ thinkingLevel: chosen }, BACKGROUND_CONTEXT);
 	host.info(`Thinking: ${chosen}`);
 	host.refreshStatus();
 }
@@ -275,6 +283,45 @@ async function resume(host: CommandHost): Promise<void> {
 	if (sessions.length === 0) return host.info("No other sessions.");
 	const meta = await pickSession(host.dialogs, sessions);
 	if (meta !== undefined) await host.switchSession(meta);
+}
+
+const PREVIEW_CHARS = 100;
+
+/**
+ * Let the user pick an earlier message of the active conversation, fork before it, make the fork active, and put the
+ * message in the editor to edit and send again.
+ */
+async function fork(host: CommandHost): Promise<void> {
+	const feed = host.feed();
+	const points = await forkPoints(feed.conversation, BACKGROUND_CONTEXT);
+	if (points.length === 0)
+		return host.info("No earlier message to fork before: the first message has nothing before it.");
+	const choice = await host.dialogs.select(
+		"Fork before a message",
+		points.map((point, index) => ({
+			value: String(point.message),
+			label: point.text.trim().split("\n")[0]?.slice(0, PREVIEW_CHARS) || "(empty)",
+			description: index === 0 ? "newest" : `${index + 1} back`,
+		})),
+	);
+	const point = points.find((candidate) => String(candidate.message) === choice?.value);
+	if (point === undefined) return;
+	const created = await createFork(
+		feed.session,
+		feed.conversation,
+		point.at,
+		host.app.paths.worktrees,
+		BACKGROUND_CONTEXT,
+	);
+	await host.activate(created.conversationId);
+	const { files } = created.record;
+	host.info(
+		files.kind === "shared"
+			? `Forked as ${created.record.label}.`
+			: `Forked as ${created.record.label} in ${tildify(files.path)}.`,
+	);
+	if (created.notice !== undefined) host.notice(created.notice);
+	host.setEditorText(point.text);
 }
 
 /** Let the user pick one of `sessions`. */

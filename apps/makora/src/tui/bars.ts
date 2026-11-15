@@ -37,16 +37,19 @@ export function spread(left: string, right: string, width: number): string {
 
 /** The top bar's data. */
 export interface TopBar {
+	/** The active conversation's fork label; undefined for the root. */
+	readonly fork: string | undefined;
 	readonly title: string | undefined;
 	readonly cwd: string;
 	readonly costUsd: number;
 	readonly elapsedMs: number;
 }
 
-/** `makora · <title> · <cwd>` with `$<cost> · <elapsed>` on the right. */
+/** `makora · [<fork> · ]<title> · <cwd>` with `$<cost> · <elapsed>` on the right. */
 export function topBar(bar: TopBar, width: number): string {
+	const fork = bar.fork === undefined ? "" : theme.dim(" · ") + theme.bold(theme.warning(bar.fork));
 	const title = bar.title ? ` · ${bar.title}` : "";
-	const left = `${theme.bold(theme.accent("makora"))}${theme.muted(`${title} · ${bar.cwd}`)}`;
+	const left = `${theme.bold(theme.accent("makora"))}${fork}${theme.muted(`${title} · ${bar.cwd}`)}`;
 	return spread(left, theme.muted(`${formatCost(bar.costUsd)} · ${formatElapsed(bar.elapsedMs)}`), width);
 }
 
@@ -57,7 +60,7 @@ export interface Dock {
 	readonly worktrees: number;
 	/** Context and compaction state, such as `auto-compact on` or `compacting`. */
 	readonly context: string;
-	/** The root conversation's Python kernel; shown once one started. */
+	/** The active conversation's Python kernel; shown once one started. */
 	readonly kernel?: KernelStatus;
 }
 

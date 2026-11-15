@@ -45,9 +45,13 @@ export async function changedFiles(cwd: string, tree: string): Promise<string[] 
 
 async function keepAlive(top: string, tree: string, ref: string): Promise<void> {
 	const parent = await git(top, ["rev-parse", "--verify", "--quiet", ref]).catch(() => undefined);
+	await git(top, ["update-ref", ref, await commitTree(top, tree, parent, "makora cell")]);
+}
+
+/** A commit of `tree` (a bare sha) by makora on top of `parent`, or a root commit without one. */
+export function commitTree(top: string, tree: string, parent: string | undefined, message: string): Promise<string> {
 	const env = { ...process.env, ...MAKORA_AUTHOR };
-	const commit = await git(top, ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", "makora cell"], env);
-	await git(top, ["update-ref", ref, commit]);
+	return git(top, ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message], env);
 }
 
 // commit-tree needs an identity; the user's may be unset, and these commits are makora's own.
@@ -58,7 +62,8 @@ const MAKORA_AUTHOR = {
 	GIT_COMMITTER_EMAIL: "makora@localhost",
 };
 
-async function git(cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<string> {
+/** Run git in `cwd` without a shell; its trimmed stdout. */
+export async function git(cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<string> {
 	const { stdout } = await run("git", [...args], { cwd, env: env ?? process.env, maxBuffer: 64 * 1024 * 1024 });
 	return stdout.trim();
 }

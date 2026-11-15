@@ -3,7 +3,7 @@
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ModelRef } from "@earendil-works/pi-durable";
+import type { ConversationId, ModelRef } from "@earendil-works/pi-durable";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -20,6 +20,7 @@ import type { MakoraApp } from "../app.ts";
 import type { PlanUsage } from "../auth/types.ts";
 import { fetchPlanUsage } from "../auth/usage.ts";
 import type { SessionChoice } from "../cli-args.ts";
+import { ensureForkFiles, hasUncommittedChanges, listForks, removeFork } from "../fork.ts";
 import { FAKE_MODEL } from "../models.ts";
 import { tildify } from "../paths.ts";
 import { gitBranch } from "../project.ts";
@@ -87,14 +88,23 @@ class MakoraTui implements CommandHost {
 	readonly #agentsRoot: Component;
 	readonly #agentsView: AgentsView;
 	readonly #diffView: DiffView;
-	readonly #branch: string | undefined;
 	readonly #skills: Skill[];
 	readonly #exit = Promise.withResolvers<number>();
 	#ui: UiState = INITIAL_UI;
+	/** The active conversation's feed. */
 	#feed: SessionFeed | undefined;
+	/** Feeds of the open session's conversations shown so far, kept so switching back keeps their local lines. */
+	readonly #feeds = new Map<ConversationId, SessionFeed>();
 	#unsubscribeFeed: (() => void) | undefined;
+	#unsubscribeNotices: (() => void) | undefined;
+	/** The branch, or short commit, of the active conversation's folder. */
+	#branch: string | undefined;
+	/** Fork worktrees of the open session, for the dock. */
+	#worktrees = 0;
 	#agentRows: AgentRow[] = [];
 	#agentsLoading = false;
+	/** A message in the agents view's hint row, until its next key. */
+	#agentsNote: string | undefined;
 	#account: AccountLabel | undefined;
 	#planUsage: PlanUsage | undefined;
 	#frame = 0;
@@ -162,11 +172,21 @@ class MakoraTui implements CommandHost {
 				sessionStartedAt: this.#feed?.session.meta.createdAt ?? Date.now(),
 				frame: this.#frame,
 				tildify,
+				note: this.#agentsNote,
 			}),
 			{
-				move: (delta) =>
-					this.dispatch({ type: "moveSelection", delta, order: this.#agentRows.map((row) => row.conversationId) }),
+				move: (delta) => {
+					this.#agentsNote = undefined;
+					this.dispatch({ type: "moveSelection", delta, order: this.#agentRows.map((row) => row.conversationId) });
+				},
 				open: () => this.#openSelectedAgent(),
+				remove: () => {
+					this.#agentsNote = undefined;
+					void this.#removeSelectedFork().catch((error: unknown) => {
+						this.#agentsNote = describeError(error);
+						this.#tui.requestRender();
+					});
+				},
 				back: () => this.#closeView(),
 			},
 		);
@@ -185,13 +205,7 @@ class MakoraTui implements CommandHost {
 				this.#closeView();
 				this.#editor.insertTextAtCursor(text);
 			},
-			confirm: async (title, action) =>
-				(
-					await this.dialogs.select(title, [
-						{ value: "confirm", label: action },
-						{ value: "cancel", label: "Cancel" },
-					])
-				)?.value === "confirm",
+			confirm: (title, action) => this.#confirm(title, action),
 		});
 	}
 
@@ -205,7 +219,7 @@ class MakoraTui implements CommandHost {
 		let code: number;
 		try {
 			if (this.#options.ephemeral) {
-				await this.#adopt(new SessionFeed(await this.#openEphemeral(this.#options.model)));
+				await this.#adopt(await this.#openEphemeral(this.#options.model));
 				code = await this.#exit.promise;
 			} else {
 				const meta = await this.#initialSession();
@@ -224,7 +238,7 @@ class MakoraTui implements CommandHost {
 			clearInterval(planTimer);
 		}
 		this.#tui.stop();
-		await this.#closeFeed();
+		await this.#closeSession();
 		return code;
 	}
 
@@ -256,8 +270,8 @@ class MakoraTui implements CommandHost {
 							{},
 							BACKGROUND_CONTEXT,
 						);
-			await this.#closeFeed();
-			await this.#adopt(new SessionFeed(session));
+			await this.#closeSession();
+			await this.#adopt(session);
 		} catch (error) {
 			if (previous === this.#feed) this.notice(describeError(error));
 		}
@@ -274,7 +288,27 @@ class MakoraTui implements CommandHost {
 
 	async submit(text: string): Promise<void> {
 		this.#scroll.scrollToEnd();
-		await this.feed().session.submit(text, BACKGROUND_CONTEXT);
+		const feed = this.feed();
+		await feed.session.submit(feed.conversation, text, BACKGROUND_CONTEXT);
+	}
+
+	async activate(id: ConversationId): Promise<void> {
+		const session = this.feed().session;
+		let feed = this.#feeds.get(id);
+		if (feed === undefined) {
+			const conversation = await session.harness.conversation(id, BACKGROUND_CONTEXT);
+			if (conversation === undefined) throw new Error(`No conversation ${id} in this session.`);
+			feed = new SessionFeed(session, conversation);
+			await feed.start();
+			this.#feeds.set(id, feed);
+		}
+		if (feed.fork !== undefined) await ensureForkFiles(session, { conversationId: id, record: feed.fork });
+		this.#show(feed);
+	}
+
+	setEditorText(text: string): void {
+		this.#editor.setText(text);
+		this.#tui.requestRender();
 	}
 
 	refreshStatus(): void {
@@ -295,7 +329,7 @@ class MakoraTui implements CommandHost {
 	interrupt(): boolean {
 		// An open autocomplete menu takes the key to close itself.
 		if (this.#editor.capturesViewportInput || !this.#feed?.state.busy) return false;
-		void this.#feed.session.root
+		void this.#feed.conversation
 			.abort(BACKGROUND_CONTEXT)
 			.catch((error: unknown) => this.notice(describeError(error)));
 		return true;
@@ -375,25 +409,57 @@ class MakoraTui implements CommandHost {
 	}
 
 	async #open(meta: SessionMeta, model: ModelRef | undefined): Promise<void> {
-		const session = await openSession(this.app, meta, model === undefined ? {} : { model }, BACKGROUND_CONTEXT);
-		await this.#adopt(new SessionFeed(session));
+		await this.#adopt(await openSession(this.app, meta, model === undefined ? {} : { model }, BACKGROUND_CONTEXT));
 	}
 
-	async #adopt(feed: SessionFeed): Promise<void> {
-		await feed.start();
+	/** Show `session` with its root conversation active. */
+	async #adopt(session: MakoraSession): Promise<void> {
+		const root = new SessionFeed(session, session.root);
+		// Notices from opening the session head the root's transcript; later ones go to the active conversation.
+		for (const notice of session.notices) root.addLocal("notice", notice.message);
+		this.#unsubscribeNotices = session.onNotice((notice) => this.notice(notice.message));
+		await root.start();
+		this.#feeds.set(session.root.id, root);
+		this.#show(root);
+		await this.#refreshPlanUsage();
+	}
+
+	/** Make `feed` the main screen's: its transcript, top bar, status row, dock, and the folder `@` completes in. */
+	#show(feed: SessionFeed): void {
+		this.#unsubscribeFeed?.();
 		this.#feed = feed;
 		this.#unsubscribeFeed = feed.onChange(() => this.#tui.requestRender());
+		const { cwd } = feed.state;
+		this.#branch = gitBranch(cwd);
+		this.#editor.setAutocompleteProvider(new CombinedAutocompleteProvider(slashCommands(this.#skills), cwd));
 		this.#scroll.scrollToEnd();
-		await this.#refreshPlanUsage();
+		this.#countWorktrees(feed.session);
 		this.#tui.requestRender();
 	}
 
-	async #closeFeed(): Promise<void> {
+	/** Count the session's fork worktrees for the dock. */
+	#countWorktrees(session: MakoraSession): void {
+		void listForks(session.harness, BACKGROUND_CONTEXT).then(
+			(forks) => {
+				this.#worktrees = forks.filter(
+					(fork) => !fork.record.removed && fork.record.files.kind !== "shared",
+				).length;
+				this.#tui.requestRender();
+			},
+			// The count is a hint; a closed session's read fails by design, and the next switch or removal counts again.
+			() => {},
+		);
+	}
+
+	async #closeSession(): Promise<void> {
 		const feed = this.#feed;
 		if (feed === undefined) return;
 		this.#unsubscribeFeed?.();
+		this.#unsubscribeNotices?.();
 		this.#feed = undefined;
-		await feed.stop();
+		const feeds = [...this.#feeds.values()];
+		this.#feeds.clear();
+		await Promise.all(feeds.map((each) => each.stop()));
 		await feed.session.close();
 	}
 
@@ -477,10 +543,50 @@ class MakoraTui implements CommandHost {
 
 	#openSelectedAgent(): void {
 		const selected = this.#ui.view.kind === "agents" ? this.#ui.view.selected : undefined;
-		const root = this.#feed?.session.root.id;
 		this.#closeView();
-		if (selected !== undefined && selected !== root)
-			this.info("Only the main conversation can be opened in phase 1.");
+		if (selected !== undefined)
+			void this.activate(selected).catch((error: unknown) => this.notice(describeError(error)));
+	}
+
+	/** `x` in the agents view: confirm, warning about uncommitted changes, then remove the selected fork. */
+	async #removeSelectedFork(): Promise<void> {
+		const feed = this.feed();
+		const selected = this.#ui.view.kind === "agents" ? this.#ui.view.selected : undefined;
+		const row = this.#agentRows.find((candidate) => candidate.conversationId === selected) ?? this.#agentRows[0];
+		if (row === undefined) return;
+		if (row.fork === undefined) {
+			this.#agentsNote =
+				row.conversationId === feed.session.root.id
+					? "The main conversation cannot be removed."
+					: "Only forks can be removed.";
+			this.#tui.requestRender();
+			return;
+		}
+		const fork = { conversationId: row.conversationId, record: row.fork };
+		const { label, files } = fork.record;
+		const title =
+			files.kind === "shared"
+				? `Remove ${label}? Its folder is shared and stays.`
+				: (await hasUncommittedChanges(fork))
+					? `${label} has uncommitted changes in ${tildify(files.path)}. Remove it and discard them?`
+					: `Remove ${label} and its worktree ${tildify(files.path)}?`;
+		if (!(await this.#confirm(title, `Remove ${label}`))) return;
+		if (this.#feed?.conversation.id === fork.conversationId) await this.activate(feed.session.root.id);
+		await removeFork(feed.session, fork, BACKGROUND_CONTEXT);
+		await this.#feeds.get(fork.conversationId)?.stop();
+		this.#feeds.delete(fork.conversationId);
+		this.#countWorktrees(feed.session);
+		this.#agentsNote = `Removed ${label}.`;
+		await this.#loadAgents();
+		this.dispatch({ type: "moveSelection", delta: 0, order: this.#agentRows.map((each) => each.conversationId) });
+	}
+
+	async #confirm(title: string, action: string): Promise<boolean> {
+		const choice = await this.dialogs.select(title, [
+			{ value: "confirm", label: action },
+			{ value: "cancel", label: "Cancel" },
+		]);
+		return choice?.value === "confirm";
 	}
 
 	#closeView(): void {
@@ -531,6 +637,7 @@ class MakoraTui implements CommandHost {
 		const feed = this.#feed;
 		return topBar(
 			{
+				fork: feed?.fork?.label,
 				title: feed?.session.meta.title,
 				cwd: tildify(feed?.state.cwd ?? this.#options.cwd),
 				costUsd: feed?.state.costUsd ?? 0,
@@ -551,7 +658,7 @@ class MakoraTui implements CommandHost {
 		return dockLine({
 			running: state?.running ?? 0,
 			waiting: state?.waiting ?? 0,
-			worktrees: 0,
+			worktrees: this.#worktrees,
 			context,
 			...(state?.kernel === undefined ? {} : { kernel: state.kernel }),
 		});

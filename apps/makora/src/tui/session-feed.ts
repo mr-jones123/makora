@@ -1,8 +1,9 @@
-// The TUI's live model of the open session: the root conversation's transcript and live state, the task graph,
-// and the derived numbers the bars show. Watches Durable and tells the TUI when anything changed.
+// The TUI's live model of one conversation of the open session: its transcript and live state, the task graph, and
+// the derived numbers the bars show. Watches Durable and tells the TUI when anything changed.
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
+	type Conversation,
 	ConversationTranscript,
 	type ConversationView,
 	type ConversationWatch,
@@ -14,6 +15,7 @@ import {
 	type TranscriptItem,
 	type UsageState,
 } from "@earendil-works/pi-durable";
+import { type ForkRecord, readFork } from "../fork.ts";
 import type { KernelStatus } from "../kernel/manager.ts";
 import type { MakoraSession } from "../session.ts";
 import { type TranscriptRow, transcriptRows } from "../transcript-rows.ts";
@@ -46,15 +48,16 @@ export interface FeedState {
 	/** Tokens of the newest request's context, from its usage. */
 	readonly contextTokens: number | undefined;
 	readonly graph: TaskGraph;
-	/** The root conversation's Python kernel, for the dock. */
+	/** The conversation's Python kernel, for the dock. */
 	readonly kernel: KernelStatus;
 }
 
 const EMPTY_GRAPH: TaskGraph = { tasks: {} };
 
-/** Watches one session for the TUI. */
+/** Watches one conversation of a session for the TUI. */
 export class SessionFeed {
 	readonly session: MakoraSession;
+	readonly conversation: Conversation;
 	readonly #transcript: ConversationTranscript;
 	readonly #listeners = new Set<() => void>();
 	/** Local rows by the newest entry when each was added; `undefined` for rows added before any entry. */
@@ -65,33 +68,37 @@ export class SessionFeed {
 	#graph: TaskGraph = EMPTY_GRAPH;
 	#usage: UsageState | undefined;
 	#agent: { model?: ModelRef; thinkingLevel?: ModelThinkingLevel; cwd?: string } = {};
-	#rootWatch: ConversationWatch | undefined;
+	#watch: ConversationWatch | undefined;
 	#graphWatch: TaskGraphWatch | undefined;
 	#derivedPending = false;
 	#derivedTimer: NodeJS.Timeout | undefined;
 	#stopped = false;
 	#localCounter = 0;
 	#state: FeedState | undefined;
-	readonly #unsubscribeNotices: () => void;
+	#fork: ForkRecord | undefined;
 	readonly #unsubscribeKernels: () => void;
 
-	constructor(session: MakoraSession) {
+	constructor(session: MakoraSession, conversation: Conversation) {
 		this.session = session;
-		const root = session.root;
+		this.conversation = conversation;
 		this.#transcript = new ConversationTranscript((query, limit, context) =>
-			root.entries(query, limit, undefined, context),
+			conversation.entries(query, limit, undefined, context),
 		);
-		for (const notice of session.notices) this.#addLocal("notice", notice.message);
-		this.#unsubscribeNotices = session.onNotice((notice) => this.addLocal("notice", notice.message));
 		this.#unsubscribeKernels = session.kernels.onChange(() => this.#changed());
+	}
+
+	/** The conversation's fork record, read at `start()`; undefined for a conversation that is not a fork. */
+	get fork(): ForkRecord | undefined {
+		return this.#fork;
 	}
 
 	/** Start watching; resolves once the first values are in. */
 	async start(): Promise<void> {
 		const context = BACKGROUND_CONTEXT;
-		this.#rootWatch = await this.session.root.watch(context);
-		this.#merge(this.#rootWatch.value);
-		this.#rootWatch.start(async (call) => {
+		this.#fork = await readFork(this.session.harness, this.conversation.id, context);
+		this.#watch = await this.conversation.watch(context);
+		this.#merge(this.#watch.value);
+		this.#watch.start(async (call) => {
 			if (call.kind !== "value") return;
 			this.#merge(call.value);
 			this.#changed();
@@ -111,9 +118,8 @@ export class SessionFeed {
 	async stop(): Promise<void> {
 		this.#stopped = true;
 		clearTimeout(this.#derivedTimer);
-		this.#unsubscribeNotices();
 		this.#unsubscribeKernels();
-		await Promise.all([this.#rootWatch?.stop(), this.#graphWatch?.stop()]);
+		await Promise.all([this.#watch?.stop(), this.#graphWatch?.stop()]);
 	}
 
 	/** Call `listener` after each change; returns the unsubscribe. */
@@ -124,7 +130,10 @@ export class SessionFeed {
 
 	/** Add a TUI message after the current transcript. */
 	addLocal(kind: LocalRow["kind"], message: string): void {
-		this.#addLocal(kind, message);
+		const anchor = this.#entries.at(-1)?.id;
+		const rows = this.#local.get(anchor) ?? [];
+		rows.push({ kind, key: `local:${this.#localCounter++}`, message });
+		this.#local.set(anchor, rows);
 		this.#changed();
 	}
 
@@ -144,13 +153,6 @@ export class SessionFeed {
 	get state(): FeedState {
 		this.#state ??= this.#compute();
 		return this.#state;
-	}
-
-	#addLocal(kind: LocalRow["kind"], message: string): void {
-		const anchor = this.#entries.at(-1)?.id;
-		const rows = this.#local.get(anchor) ?? [];
-		rows.push({ kind, key: `local:${this.#localCounter++}`, message });
-		this.#local.set(anchor, rows);
 	}
 
 	#merge(view: ConversationView): void {
@@ -194,7 +196,7 @@ export class SessionFeed {
 
 	async #loadDerived(): Promise<void> {
 		const context = BACKGROUND_CONTEXT;
-		const [usage, agent] = await Promise.all([this.session.harness.usage(context), this.session.root.agent(context)]);
+		const [usage, agent] = await Promise.all([this.session.harness.usage(context), this.conversation.agent(context)]);
 		this.#usage = usage;
 		this.#agent = {
 			...(agent.model === undefined ? {} : { model: agent.model }),
@@ -229,7 +231,7 @@ export class SessionFeed {
 			waiting: parked.length,
 			contextTokens: this.#contextTokens(),
 			graph: this.#graph,
-			kernel: this.session.kernels.status(this.session.root.id),
+			kernel: this.session.kernels.status(this.conversation.id),
 		};
 	}
 

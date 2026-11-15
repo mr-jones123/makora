@@ -6,15 +6,15 @@
 
 | File | Owns |
 | --- | --- |
-| `run.ts` | The composition root: builds both screens, opens and switches sessions, routes keys and commands, the ticker |
-| `session-feed.ts` | The live model of the open session: watches the root conversation, the transcript window, the task graph, the root's kernel status (`session.kernels`), and derived numbers (cost, context tokens, counts) |
+| `run.ts` | The composition root: builds both screens, opens and switches sessions, keeps the active conversation and one feed per conversation shown, routes keys, commands and session notices, removes forks, the ticker |
+| `session-feed.ts` | The live model of one conversation of the open session: watches it, the transcript window, the task graph, its kernel status (`session.kernels`), its fork record, and derived numbers (cost, context tokens, counts) |
 | `ui-state.ts` | The TUI's own state as a reducer: which view (main, agents, diff), the selected agent, expanded tool cells |
 | `transcript-view.ts` | Draws feed rows: messages, markdown, thinking, tool summaries or expanded cells (a python cell's code, output tail and nested calls), notices |
 | `bars.ts` | One-row bars: top bar, activity row with the kernel label (`kernelLabel`), status row, hints, rules |
 | `splash.ts` | The empty-transcript splash: full (wheel + wordmark) and compact (small wheel) variants |
-| `agents.ts` | The agents view and loading its rows from the task graph and conversation scan |
+| `agents.ts` | The agents view and loading its rows from the task graph, the conversation scan and the fork records |
 | `dialogs.ts` | Modal selector and text input overlays used by commands and login |
-| `commands.ts` | The slash command table, autocomplete entries, login and account flows |
+| `commands.ts` | The slash command table, autocomplete entries, login and account flows, the `/fork` picker |
 | `keybindings.ts` | Makora's bindings merged over pi-tui's, plus user overrides |
 | `account-label.ts` | The status row's account label |
 | `rounded-editor.ts` | pi-tui's editor drawn in a rounded box |
@@ -54,8 +54,10 @@ below wheel + gap + wordmark.
 
 ## Data flow
 
-1. `SessionFeed` calls `root.watch()` (Durable) and turns each value into rows with `transcript-rows.ts`: committed
-   entries plus the streaming partial message and tool slots from the `pi.live` document.
+1. The active conversation's `SessionFeed` calls `conversation.watch()` (Durable) and turns each value into rows with
+   `transcript-rows.ts`: committed entries plus the streaming partial message and tool slots from the `pi.live`
+   document. Feeds of conversations shown earlier keep watching, so switching back keeps their local lines; all stop
+   when the session closes. Forks: [forks.md](forks.md#switching).
 2. Older entries come from `ConversationTranscript` when the user scrolls to the top.
 3. `harness.watchTaskGraph()` gives running and waiting counts and the agents view's rows.
 4. Cost, model and context tokens are derived on a 250 ms debounce. The timer is cleared on `stop()`, and rejections
@@ -68,7 +70,8 @@ Local lines (command output `·`, notices `⚠`) are added to the feed but not t
 
 `run.ts` registers one input listener that runs before the focused component. On the main screen without an overlay,
 it walks the `APP_KEYS` table (`app.interrupt`, `app.exit`, `app.cancel`, `app.tools.expand`, `app.agents`,
-`app.model.select`, `app.diff`); an action returning `false` lets the key through to the editor. Bindings are never
+`app.model.select`, `app.diff`); an action returning `false` lets the key through to the editor. The agents view reads
+`tui.select.*` and `app.agents.remove` itself. Bindings are never
 matched by literal key strings: `keybindings.ts` declares makora's ids and defaults, merges them over pi-tui's
 `TUI_KEYBINDINGS` in a `KeybindingsManager`, and applies `~/.makora/keybindings.json` (validated; bad entries
 skipped).

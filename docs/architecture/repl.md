@@ -262,6 +262,16 @@ Failed: model (blob missing (pruned or never written))
   while saving the snapshot of cell N`. The protocol has no error reply for a snapshot. The next cell restores the
   snapshot before it.
 
+### At a fork
+
+A fork's history is its parent's entries up to the fork point followed by its own, so `findRestorePoint` needs nothing
+fork-specific: the fork's first cell starts a kernel in the fork's `cwd` and restores the newest snapshot at or before
+the fork point, with the usual notice. The fork's files are a worktree at the tree that snapshot's cell captured, so the
+notice lists no changed files. Without a snapshot before the fork point, the fork restarts empty with the notices above.
+Verified end to end in `test/fork.test.ts`: after `x = 41`, then `x = 99` in the root, a fork before the second prints
+`Kernel restarted. Variables restored to after cell 4: x.` and `41`, while the root's kernel still holds 99. Worktrees
+and the fork document: [forks.md](forks.md).
+
 ### When makora itself dies
 
 The kernel manager writes each kernel's pid to `sessions/<id>/kernels/<conversation>.pid` and deletes the file when
@@ -331,7 +341,6 @@ The phase 2 design written before the build differed in these points:
 - **Pruning.** Every blob stays until the session is deleted. The plan keeps full blobs for the last N cells, fork
   points and marked cells, and reports a restore that needs a pruned blob as pruned (the restore side already reports
   a missing blob).
-- **Restore at a fork.** Forking a conversation at an entry should restore that entry's snapshot.
 - **Subagents.** `spawn`, `send`, `collect`, `merge`, `list_agents` and the parked model tool `wait_agents`, each
   child with its own worktree and kernel. Design: [subagents.md](subagents.md). A spawned child will belong to a
   background anchor task owned by the conversation, not to the cell: Durable aborts the nested calls of a tool call

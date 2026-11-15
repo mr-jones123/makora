@@ -1,5 +1,5 @@
-// One open session: its lock, its Durable harness over `session.sqlite` (or memory, when ephemeral), the root
-// conversation the user talks to, and the Python kernels of its conversations.
+// One open session: its lock, its Durable harness over `session.sqlite` (or memory, when ephemeral), its root
+// conversation, and the Python kernels of its conversations.
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
 import { uuidv7 } from "@earendil-works/pi-ai";
@@ -48,10 +48,10 @@ export interface MakoraSession {
 	readonly notices: readonly SessionNotice[];
 	/** Call `listener` with each later notice; returns the unsubscribe. */
 	onNotice(listener: (notice: SessionNotice) => void): () => void;
-	/** Submit user input to the root conversation; the first input becomes the session title. */
-	submit(text: string, context: Context): Promise<Submission>;
-	/** Switch the root conversation's model, and record it in the meta. */
-	setModel(model: ModelRef, context: Context): Promise<void>;
+	/** Submit user input to `conversation`; the session's first input becomes its title. */
+	submit(conversation: Conversation, text: string, context: Context): Promise<Submission>;
+	/** Switch `conversation`'s model; the root's is recorded in the meta. */
+	setModel(conversation: Conversation, model: ModelRef, context: Context): Promise<void>;
 	/** Close the harness, stop the kernels, and release the lock. */
 	close(): Promise<void>;
 }
@@ -193,15 +193,15 @@ async function open(
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
-		async submit(text, submitContext) {
-			const submission = await root.submit({ type: "input", content: text }, submitContext);
+		async submit(conversation, text, submitContext) {
+			const submission = await conversation.submit({ type: "input", content: text }, submitContext);
 			const title = current.title ?? (text.trim().split("\n")[0]?.slice(0, TITLE_LENGTH) || undefined);
 			current = update(current, title === undefined ? {} : { title });
 			return submission;
 		},
-		async setModel(next, modelContext) {
-			await root.configure({ model: next }, modelContext);
-			current = update(current, { model: `${next.provider}/${next.modelId}` });
+		async setModel(conversation, next, modelContext) {
+			await conversation.configure({ model: next }, modelContext);
+			if (conversation.id === root.id) current = update(current, { model: `${next.provider}/${next.modelId}` });
 		},
 		async close() {
 			try {

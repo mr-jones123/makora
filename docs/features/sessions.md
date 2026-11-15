@@ -79,6 +79,32 @@ In an ephemeral TUI, `/new` starts another ephemeral session and `/resume` opens
 Automatic compaction is on: when the context fills up, Durable summarizes older turns. `/compact [instructions]`
 compacts now. The activity row shows the compaction state.
 
+## Forks
+
+`/fork` branches the active conversation before an earlier message. Pick the message (newest first); the fork shares
+the history up to just before it, becomes the active conversation, and gets the message in the editor to edit and send
+again. The original conversation stays as it was. Forking needs a second message: the first has nothing before it.
+
+What the fork starts with:
+
+- **Variables** as they were at that point. The fork's first cell restores the fork point's snapshot and says so
+  (`Kernel restarted. Variables restored to after cell 4: x.`).
+- **Files** as they were at that point, in a git worktree of its own under
+  `~/.makora/worktrees/<repo>-<hash>/<session>/<conversation>`, at the file snapshot of the newest cell before the
+  fork point. Its cells, `/diff` and the status row use that folder. Your branches, index and checkout do not change.
+- Without a file snapshot before the fork point (no cell ran, snapshots are off, an ephemeral session), the worktree
+  starts at `HEAD`, and the fork says `No file snapshot at the fork point; the fork's files start at HEAD (uncommitted
+  changes are not included).`
+- Outside a git repository, the fork shares the folder with the original and says so.
+
+Forks are labeled `fork 1`, `fork 2`, … in the top bar (`makora · fork 2 · …`) and the agents view. Ctrl+A lists the
+main conversation and its forks; Enter makes one active, `x` removes a fork (its worktree, after a warning when it has
+uncommitted changes, and its kernel; the transcript stays in the session). Forks are saved in `session.sqlite`, so
+they survive restarts: `--continue` and `/resume` open the main conversation, and the agents view reaches the forks.
+
+Merging a fork's files back is not built; use git in its worktree (`git diff HEAD`, commit, cherry-pick). Subagents
+will bring `merge` in phase 3. Internals: [architecture/forks.md](../architecture/forks.md).
+
 ## Limits
 
 - The TUI and the session run in one process; closing the terminal ends the run. The background service comes in

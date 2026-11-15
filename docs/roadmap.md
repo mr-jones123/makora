@@ -53,11 +53,26 @@ Open items of phase 2:
 | Item | Needs |
 | --- | --- |
 | Blob pruning: every blob stays until its session is deleted | Keep the last N cells, fork points and marked cells; pick N |
-| Restoring the snapshot of a fork point when a conversation is forked | Built with forking |
 | `ctx.get(name)` handles for files and child results | Child results arrive with phase 3 |
 | Cheaper change detection: every variable is pickled again after every cell to hash it | A measurement on real workloads (DataFrames) |
 | Memory limits on the kernel process | A limit and how to report it |
 | Kernel startup cost per subagent (a process plus a restore) | Measure with 4 children in phase 3 |
+
+## Forks (built)
+
+`/fork` branches the active conversation before an earlier message, with that point's Python variables and files: a
+Durable fork, plus a git worktree at the fork point's file snapshot under `~/.makora/worktrees/`. The agents view
+lists the main conversation and its forks; Enter makes one active and `x` removes a fork with its worktree
+([features/sessions.md](features/sessions.md#forks), [architecture/forks.md](architecture/forks.md)). Verified in
+`test/fork.test.ts` (real kernels, temp repository) and in tmux with the fake model.
+
+Open items of forks:
+
+| Item | Needs |
+| --- | --- |
+| Merging a fork's files back | Phase 3's `merge` |
+| Deleting a session's fork worktrees and refs with the session | Session deletion |
+| An ephemeral session's fork worktrees stay after it ends | A decision: remove them on exit, or keep them as the session's file output |
 
 ## The diff view (built)
 

@@ -21,10 +21,10 @@ describe("session feed", () => {
 			const home = mkdtempSync(join(tmpdir(), "makora-home-"));
 			const app = openApp(home, true);
 			const session = await openSession(app, createSession(app.paths.sessions, home), {}, BACKGROUND_CONTEXT);
-			const feed = new SessionFeed(session);
+			const feed = new SessionFeed(session, session.root);
 			await feed.start();
 			const changed = new Promise<void>((resolve) => feed.onChange(resolve));
-			await session.submit("hello", BACKGROUND_CONTEXT);
+			await session.submit(session.root, "hello", BACKGROUND_CONTEXT);
 			await changed;
 
 			await feed.stop();
