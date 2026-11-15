@@ -9,9 +9,9 @@ fix one of them in the same change.
 
 | Phase | What | State |
 | --- | --- | --- |
-| 1 | App skeleton: CLI, Durable sessions, TUI, Claude subscription login with accounts, bundled pstack and no-mistakes with a sync CI job | **Built**, uncommitted in the working tree |
-| 2 | Persistent Python REPL with `llm`, `spawn`, context handles, per-cell snapshots | Designed |
-| 3 | Subagents in git worktrees with explicit merge | Designed |
+| 1 | App skeleton: CLI, Durable sessions, TUI, Claude subscription login with accounts, bundled pstack and no-mistakes with a sync CI job | **Built**, committed on `main`, not pushed |
+| 2 | Persistent Python REPL as the model's one tool: file and shell helpers, `llm`, `ctx`, per-cell snapshots, `--ephemeral`; plus the `/diff` view | **Built**; open: pruning, fork restore |
+| 3 | Subagents, each with its own worktree and REPL; `wait_agents`; the agents dashboard | Designed, next |
 | 4+ | Background service, autonomous mode, evals against Prime Agent, self-evolution, sandboxes | Planned |
 
 Details and open items: [roadmap.md](roadmap.md).
@@ -22,7 +22,10 @@ Details and open items: [roadmap.md](roadmap.md).
 2. [getting-started.md](getting-started.md): install the `makora` command, log in, daily use.
 3. Features, what a user sees and can rely on:
    - [features/tui.md](features/tui.md): the screen, the splash, the agents view, keys and slash commands.
-   - [features/sessions.md](features/sessions.md): sessions, crash recovery, one writer per session, print mode.
+   - [features/repl.md](features/repl.md): the Python REPL, its helpers, cells in the TUI, what survives a crash.
+   - [features/diff.md](features/diff.md): the diff view, its tabs, layouts and keys, asking about a line.
+   - [features/sessions.md](features/sessions.md): sessions, crash recovery, ephemeral sessions, one writer per
+     session, print mode.
    - [features/accounts.md](features/accounts.md): login, multiple accounts, plan usage, how Anthropic bills it.
    - [features/skills.md](features/skills.md): bundled pstack and no-mistakes, where skills are found, conflicts.
 4. Architecture, how it is built:
@@ -31,7 +34,7 @@ Details and open items: [roadmap.md](roadmap.md).
    - [architecture/tui.md](architecture/tui.md): the TUI's live model, layout, state and key routing.
    - [architecture/auth.md](architecture/auth.md): the account store, locking, login flow, the pi-ai change.
    - [architecture/skills-pipeline.md](architecture/skills-pipeline.md): the skills generator, lock, adapter and CI.
-   - [architecture/repl.md](architecture/repl.md): phase 2 design.
+   - [architecture/repl.md](architecture/repl.md): the REPL as built: kernel, protocol, snapshots, restore.
    - [architecture/subagents.md](architecture/subagents.md): phase 3 design.
 5. Reference: [reference/cli.md](reference/cli.md), [reference/configuration.md](reference/configuration.md).
 6. [development.md](development.md): working on makora, checks, tests, CI, upstream sync.
@@ -44,7 +47,9 @@ Details and open items: [roadmap.md](roadmap.md).
 | Session | One `makora` run's durable state: a SQLite file holding the transcript, tasks and documents. |
 | Conversation | A transcript inside a session. The user talks to the root conversation; subagents get their own. |
 | Durable | `packages/durable` (`@earendil-works/pi-durable`): the runtime that commits every change before it is shown and resumes after a crash. |
-| Cell | One Python REPL execution (phase 2). |
+| Cell | One execution of the `python` tool in a conversation's REPL, numbered per conversation. |
+| Kernel | The Python process that runs a conversation's cells and holds its variables. |
+| Snapshot | The variables and the git tree saved after a cell, referenced from its committed result. |
 | Skill | A folder with a `SKILL.md` of instructions the model reads when a task matches. |
 | pstack | poteto's skill pack for rigorous agent work, from `cursor/plugins`, bundled with makora. |
 | Harness bundle | The evolved prompts, memories, skills, subagent specs and extensions an instance exports (phase 6). |

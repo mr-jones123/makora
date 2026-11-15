@@ -62,3 +62,36 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
 - **Ctrl+C stops a run, else clears the editor, else exits on a second press within 1.5 s (2026-11-15).**
 - **`docs/` is the source of truth for makora (owner, 2026-11-15).** Features, architecture, roadmap and decisions
   live there and change with the code.
+- **Every subagent gets its own worktree and its own REPL (owner, 2026-11-15).** Reviewers too: a `review` child gets
+  a detached checkout of the commit under review, so it can run tests without touching the parent's tree, and its
+  worktree is deleted with it; a `write` child gets branch `makora/<session>/<name>` and only an explicit `merge`
+  brings its work back. Each child conversation starts its own Python kernel in its worktree.
+- **The subagents dashboard is layout A: list and inspector (owner, 2026-11-15).** Enter opens an agent in the main
+  screen, where typed input goes to it. A live view inside the dashboard waits until pi-tui can route keys to a second
+  scrolling area.
+- **REPL details (2026-11-15, recommended defaults, open for the owner).** The model is offered only `python` and
+  `wait_agents`; file and shell tools are called from Python and still run through Durable. Worktrees live outside the
+  repository, at `~/.makora/worktrees/<repo>/<session>/<name>`. A project may set a setup command run in new
+  worktrees. Makora starts kernels itself with `child_process`, from one shared `uv` environment at
+  `~/.makora/python`; Durable stays unchanged.
+- **Durable stays the only runtime; durability is optional (owner asked for optional durability, 2026-11-15).** Not
+  every task is long-running, but the cost of saving sits in REPL snapshots and session files, not in Durable's
+  commits: a measured fake-model run took about 1 ms longer on SQLite than in memory. A second runtime for quick
+  tasks would need a second version of the REPL tool, subagents and the TUI feed. So two switches decide what is
+  saved: `--ephemeral` runs the session on Durable's `MemoryStorage` (no session directory, no snapshots), and
+  `"snapshots": false` in `settings.json` keeps sessions but not REPL variables. Print mode still saves its session,
+  so `--continue -p` keeps working. See [architecture/repl.md](architecture/repl.md#durability-is-optional).
+- **The model is offered only `python` (2026-11-16, follows the 2026-11-15 default, open for the owner).** The coding
+  tools stay installed and run as nested Durable calls from cells, so every file and shell action is still recorded.
+  `wait_agents` joins `python` when subagents are built.
+- **Snapshots pickle with Python's C pickler and fall back to dill (2026-11-16).** dill's pickler is written in Python
+  and took 3.6 s on a list of 1e7 ints, against 258 ms for the whole snapshot with the C pickler. dill is still used
+  for functions and classes defined in the REPL, which the C pickler would save by name, and for every load. Both
+  write the same bytes for plain data, so blob hashes do not depend on which pickler ran. Blobs are not compressed:
+  Python 3.12 has no zstd in its standard library.
+- **The `/diff` view is layout A, with B and C, plus a History tab (owner, 2026-11-16).** A is a file list beside the
+  selected file's diff. B stacks every file in one scroll below 100 columns. C shows old and new side by side on `v`
+  from 120 columns. Tabs are Working tree, Staged, vs the base branch and History, so recent commits are readable
+  without leaving makora. `a` puts the hunk with the cursor line marked into the editor, so the user can ask the agent
+  about a line. The view stages, unstages and reverts, but never commits: committing stays with the agent and
+  `no-mistakes`. See [features/diff.md](features/diff.md).

@@ -28,18 +28,65 @@ Open items of phase 1:
 | Account identity rule "a person in one organization" | Owner confirmation ([decisions.md](decisions.md)) |
 | `auth.json` uses `proper-lockfile`, whose stale-lock takeover can double-grant after a crash | Switch to the SQLite lock the sessions use |
 | Bootstrap-endpoint fallback when the token response has no identity | Only if the live login shows it is needed |
-| Nothing is committed | The owner asks for a commit or PR |
 
-## Phase 2: Python REPL (designed)
+## Phase 2: Python REPL (built)
 
-The model's main tool becomes a persistent Python kernel: context as variables, `llm()` for cheap model calls,
-`spawn()`/`collect()` for subagents, per-cell snapshots tied to Durable commits so variables survive crashes.
-Design: [architecture/repl.md](architecture/repl.md). The skills adapter gains rows for the new tools in the same PR.
+Delivered in `apps/makora`, verified with the fake model in print mode (`test/repl-print.test.ts`) and, for the cell
+lines, in tmux ([features/repl.md](features/repl.md), [architecture/repl.md](architecture/repl.md)):
 
-## Phase 3: worktree subagents (designed)
+- The model is offered one tool, `python`: a persistent kernel per conversation, with top-level `await`, output
+  streaming, interrupts on Esc and a 600 s default timeout.
+- Helpers in every cell: `read`, `write`, `edit` and `bash` as nested Durable calls, `llm` for one model call
+  (optionally schema-checked), `ctx.input()` and `ctx.transcript()`.
+- Per-cell snapshots: variables pickled into content-addressed blobs, a git tree of the worktree under
+  `refs/makora/<session>/<conversation>`, both referenced from the committed result. A new kernel restores the newest
+  snapshot and tells the model what was restored, dropped, failed, or changed on disk.
+- A makora killed with `kill -9` mid-cell: the cell ends as interrupted, the next open kills the leftover kernel by its
+  pid file, and the next cell restores.
+- Durability is optional: `--ephemeral` sessions live in memory, and `"snapshots": false` keeps sessions but not
+  variables.
+- Cells in the TUI with their number, code, output and nested calls; the kernel's state in the activity row.
+- The new preamble, and the skills adapter mapping Cursor's tools to the REPL helpers.
 
-`spawn(..., worktree=True)` gives a child its own git worktree and branch, a budget, and an explicit merge back.
-Design: [architecture/subagents.md](architecture/subagents.md).
+Open items of phase 2:
+
+| Item | Needs |
+| --- | --- |
+| Blob pruning: every blob stays until its session is deleted | Keep the last N cells, fork points and marked cells; pick N |
+| Restoring the snapshot of a fork point when a conversation is forked | Built with forking |
+| `ctx.get(name)` handles for files and child results | Child results arrive with phase 3 |
+| Cheaper change detection: every variable is pickled again after every cell to hash it | A measurement on real workloads (DataFrames) |
+| Memory limits on the kernel process | A limit and how to report it |
+| Kernel startup cost per subagent (a process plus a restore) | Measure with 4 children in phase 3 |
+
+## The diff view (built)
+
+`/diff` and Ctrl+G open a full-screen view of the repository: Working tree, Staged, vs the base branch and History
+tabs; layout A (file list and diff), B (one scroll, under 100 columns) and C (side by side); stage, unstage and
+revert; and `a` to ask about a diff line in the editor ([features/diff.md](features/diff.md)).
+
+Open items of the diff view:
+
+| Item | Needs |
+| --- | --- |
+| A "This session" tab and one tab per subagent | The session's cell trees; phase 3 |
+| Mouse support | Mouse handling in `DiffView` |
+| At 80 columns the hint row is cut off after `r reve…` | A shorter hint set for narrow screens |
+| `diff-state.ts` has no unit tests; the tmux runs cover it | Reducer tests |
+
+## Phase 3: subagents (designed, next)
+
+Every subagent gets its own worktree (`review` or `write` mode) and its own kernel, and is managed from the agents
+dashboard (layout A). Design: [architecture/subagents.md](architecture/subagents.md).
+
+Build order, continuing the REPL's steps 1 to 3; each step ends in a check on the real thing before the next starts:
+
+| # | Step | Done when |
+| --- | --- | --- |
+| 4 | Worktree manager; `spawn`, `send`, `collect`, `wait_agents`, `merge`; budgets; cleanup | Two reviewers and a writer run in parallel; a makora crash keeps the children; merge reports conflicts; remove deletes the worktree |
+| 5 | Dashboard (layout A): inspector, open an agent, message, diff, merge, stop, remove | Each action works in tmux with the fake model |
+| 6 | Prompt and skills: `wait_agents` offered to the model; adapter maps Task to `spawn` (cloud agents to `write` worktrees); pstack model roles as a makora setting | `sync-skills --check` green; `interrogate` and `swarm` run real subagents |
+| 7 | End-to-end scenarios with the fake model; docs updated | "Two reviewers on worktrees, crash midway, resume, merge" passes |
 
 ## Later phases (planned)
 

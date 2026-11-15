@@ -18,9 +18,10 @@ Makora ships 63 skills in `apps/makora/skills`, generated from pinned upstream s
 Most pstack skills are user-invoked only (`disable-model-invocation: true`); 7 of the 63 are offered to the model.
 
 pstack was written for Cursor. Each pstack skill that uses a Cursor term starts with a line pointing to
-`makora-adapter`, which maps those terms to what makora has today: `read`, `write`, `edit`, `bash`; questions asked in
-plain text; no subagents yet, so subagent steps run inline or are skipped with a `Skipped in Makora:` line. When
-makora gains the REPL and `spawn()`, the adapter changes in the same PR.
+`makora-adapter`, which maps those terms to what makora has today: the `python` tool and its helpers (`await
+read(...)`, `write`, `edit`, `bash`, with `rg` through `bash` for searching); questions asked in plain text; no
+subagents yet, so subagent steps run inline or are skipped with a `Skipped in Makora:` line. When makora gains
+`spawn()`, the adapter changes in the same PR.
 
 The `no-mistakes` binary is not bundled; install it separately ([getting-started.md](../getting-started.md)).
 

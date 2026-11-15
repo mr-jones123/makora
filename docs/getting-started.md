@@ -27,8 +27,12 @@ makora
 4. Check the status row: the account label should read your email, `subscription · extra usage`, and a plan usage
    window such as `5h 42%` when Anthropic answers the usage request.
 
-Without logging in, `makora --fake` runs a scripted fake model: it answers in markdown and runs one slow `bash` call
-when the prompt mentions "tool". Tools still act on real files.
+Without logging in, `makora --fake` runs a scripted fake model: it answers in markdown, and a prompt with a keyword such
+as `python`, `remember`, `file` or `crash` makes it run scripted Python cells (all keywords:
+[architecture/runtime.md](architecture/runtime.md#models-and-settings)). Tools still act on real files.
+
+The model works through a Python REPL ([features/repl.md](features/repl.md)). Its first cell builds makora's Python
+environment, which needs [uv](https://docs.astral.sh/uv/), or `python3` 3.11 or newer with `venv` and `pip`.
 
 ## Daily use
 
@@ -39,10 +43,11 @@ when the prompt mentions "tool". Tools still act on real files.
 | `makora --resume` | Pick a session |
 | `makora ls` | List sessions |
 | `makora -p "explain this repo"` | Print mode: answer on stdout, no TUI |
+| `makora --ephemeral` | A session kept in memory only: nothing saved, nothing to resume |
 
 In the TUI: Esc stops a run, Ctrl+C stops a run or clears the editor (twice on an empty editor exits), Ctrl+O expands
-tool output, Ctrl+A opens the agents view, Ctrl+L picks a model, `/` lists commands. Full list:
-[features/tui.md](features/tui.md).
+tool output, Ctrl+A opens the agents view, Ctrl+G opens the diff view, Ctrl+L picks a model, `/` lists commands. Full
+list: [features/tui.md](features/tui.md).
 
 ## Where things live
 

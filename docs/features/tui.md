@@ -1,7 +1,7 @@
 # The TUI
 
-Makora's terminal UI is one column ("layout A") plus a full-screen agents view. It runs on pi-tui's alternate screen
-with mouse support. Internals: [architecture/tui.md](../architecture/tui.md).
+Makora's terminal UI is one column ("layout A") plus two full-screen views: the agents view and the diff view. It runs
+on pi-tui's alternate screen with mouse support. Internals: [architecture/tui.md](../architecture/tui.md).
 
 ## The main screen
 
@@ -11,7 +11,7 @@ Top to bottom:
 | --- | --- |
 | Top bar | `makora` · session title (the first prompt) · working directory; right: session cost and time since the session started |
 | Transcript | Your messages (`›`), the model's answers as markdown, thinking as one muted line (`∴ thinking · …`), tool calls, notices |
-| Activity row | `◆ N running` (green when above 0) · `◌ N waiting` · `N worktrees` (always 0 until phase 3) · compaction state |
+| Activity row | `◆ N running` (green when above 0) · `◌ N waiting` · `N worktrees` (always 0 until phase 3) · the Python kernel, once a cell started one (`py running 3 vars @ cell 7 45 MB`, `py dead (exit 1)` as a warning; see [repl.md](repl.md#cells-in-the-tui)) · compaction state |
 | Status row | model · thinking level · directory (git branch) · a 20-cell context gauge with `NN% of <window>`; right: the account label |
 | Editor | A rounded box; `/` opens command autocomplete |
 | Hint row | The main keys, read from the key bindings so remaps show; shows `press ctrl+c again to exit` after a first Ctrl+C |
@@ -19,8 +19,10 @@ Top to bottom:
 ### Tool calls
 
 Each tool call is one line that keeps its height while its state changes: `<marker> <tool> · <argument preview> ·
-<duration>`. Markers: a spinner while running, `✓` success, `✗` error, `◌` pending or parked. Ctrl+O toggles expanded
-mode for all calls, which adds the arguments and the last 20 lines of output.
+<duration>`. Markers: a spinner while running, `✓` success, `✗` error, `◌` pending or parked. The model's calls are
+Python cells, shown as `✓ python · cell 3 · <first line of the code> · 2.3s`. Ctrl+O toggles expanded mode for all
+calls, which adds the arguments (a cell's code), the last 20 lines of output, and for a cell one `↳` line per call it
+made, such as `↳ ✓ bash · echo hello; sleep 2 · 2.1s` ([repl.md](repl.md#cells-in-the-tui)).
 
 ### Notices
 
@@ -37,7 +39,8 @@ returns. Earlier entries load when you scroll to the top.
 While the transcript is empty, the splash replaces it, centered:
 
 - Wide and tall enough (about 87 columns, 24 rows): the brass dharma wheel beside the `MAKORA` wordmark, the tagline
-  "a self-evolving harness for long-running work", and key hints.
+  "a self-evolving harness for long-running work", and key hints (`/login`, `/ commands`, `ctrl+a agents`, `ctrl+g
+  diff`).
 - Narrower (zoomed in, split panes): the wheel alone.
 - Shorter: an 11-row wheel alone. Shorter still: nothing.
 - When one of makora's bundled skills hides a skill you installed under the same name, a warning line under the
@@ -56,6 +59,11 @@ Ctrl+A opens it; Esc returns.
 - Right: the selected agent's model, directory, cost and turns, and its recent tool calls.
 - Keys: ↑/↓ select, Enter opens (phase 1: the root only), Esc back.
 
+In phase 3 this becomes the subagents dashboard (layout A): sections RUNNING, WAITING ON YOU, DONE; rows with mode,
+branch or ref, budget bar and current cell; an inspector with kernel state, budgets, recent cells and the worktree
+diff stat; keys `d` diff, `m` merge, `s` stop, `x` remove; Enter opens the agent in the main screen, where what you
+type goes to it. Design: [architecture/subagents.md](../architecture/subagents.md#the-dashboard).
+
 ## Keys
 
 | Key | Action | Binding id |
@@ -66,6 +74,7 @@ Ctrl+A opens it; Esc returns.
 | Ctrl+O | Expand or collapse tool calls | `app.tools.expand` |
 | Ctrl+A | Agents view | `app.agents` |
 | Ctrl+L | Model picker | `app.model.select` |
+| Ctrl+G | Diff view ([diff.md](diff.md)) | `app.diff` |
 | Home | Start of the editor line (Ctrl+A is taken by the agents view) | pi-tui editor |
 | PgUp / PgDn, Ctrl+Home / Ctrl+End | Scroll the transcript | pi-tui |
 
@@ -83,6 +92,7 @@ Every binding can be remapped in `~/.makora/keybindings.json` ([reference/config
 | `/new` | Start a new session in this directory |
 | `/resume` | Resume another session |
 | `/compact [instructions]` | Compact the context now |
+| `/diff` | Open the diff view: changes, staging, commit history, ask about a line ([diff.md](diff.md)) |
 | `/skill:<name> [args]` | Run a skill: its instructions plus your arguments become the message |
 | `/quit` | Exit |
 

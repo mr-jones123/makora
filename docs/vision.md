@@ -58,8 +58,8 @@ Current scope is phases 1 to 3; later phases are revisited once those work.
 
 1. App skeleton on Durable: CLI, SQLite storage, a new TUI, Anthropic subscription login with multiple accounts, and
    the pstack and no-mistakes skills kept current by a scheduled CI job.
-2. Persistent Python REPL with `llm`, `spawn`, `collect` and context handles; per-cell snapshots.
-3. Subagents in git worktrees, with explicit merge.
+2. Persistent Python REPL with `llm` and context handles; per-cell snapshots.
+3. Subagents with `spawn` and `collect`, each in its own git worktree with its own REPL, with explicit merge.
 4. Long-running operation: background service with one worker process per session, goals, autonomous mode with
    quality gates, schedules.
 5. Evaluations against Prime Agent on the same tasks.

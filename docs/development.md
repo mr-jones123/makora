@@ -26,6 +26,11 @@ cd apps/makora
 npm start -- --fake                                          # or the linked `makora` command
 ```
 
+The REPL needs [uv](https://docs.astral.sh/uv/), or `python3` (3.11 or newer) with `venv` and `pip`. The first cell
+builds `<MAKORA_HOME>/python/venv` with Python 3.12 (uv) and `dill==0.4.1`, which needs network access once. The
+Python side is `apps/makora/python/makora_rlm/`; it is put on `PYTHONPATH`, not installed, so edits apply to the next
+kernel. Change `src/kernel/protocol.ts` and `python/makora_rlm/protocol.py` together.
+
 ## Checks and tests
 
 ```sh
@@ -40,6 +45,13 @@ The repository's root `npm run check` covers `packages/*` only; run it too after
 `packages/ai`). Tests are `node:test`, behavior-level, with temporary `MAKORA_HOME` directories. Lock tests start real
 child processes (`test/fixtures/`).
 
+The REPL tests need uv or Python too, because they build a real environment in their temporary home:
+
+| File | Covers |
+| --- | --- |
+| `test/kernel.test.ts` | The environment build (two processes at once), the kernel protocol (variables, output, last value, tracebacks, interrupts, timeouts, `os._exit`, host requests), snapshots and restore (shared objects, dropped variables, unchanged blobs), and killing a kernel a crashed process left behind |
+| `test/repl-print.test.ts` | The real CLI with `--fake` in a temporary repo: cells across runs, `write`, `read` (whole files and the long-line refusal) and `edit` through Durable, `ctx`, a kernel crash, files changed since the restored cell, `kill -9` of makora mid-cell, `llm` with and without a schema, `"snapshots": false`, both `restarted empty` notices, and `--ephemeral` |
+
 For TUI changes, check the real screen in tmux with `--fake` and a temporary `MAKORA_HOME`, at a wide size (140x40), a
 narrow one (80x40) and a short one (140x20). Example harnesses from phase 1 are kept locally in `.audit/harness/`
 (not committed).
@@ -48,7 +60,7 @@ narrow one (80x40) and a short one (140x20). Example harnesses from phase 1 are 
 
 | Workflow | Runs | On |
 | --- | --- | --- |
-| `makora.yml` | `npm ci`, model data, makora `check` and tests | PRs and pushes to `main` touching `apps/makora`, `packages`, the lockfile |
+| `makora.yml` | Node 22 and Python 3.12 (`actions/setup-python`, pinned by commit), `npm ci`, model data, makora `check` and tests | PRs and pushes to `main` touching `apps/makora`, `packages`, the lockfile |
 | `makora-skills.yml` | `sync-skills --check`; daily `--latest` and a sync PR | See [architecture/skills-pipeline.md](architecture/skills-pipeline.md) |
 | `ci.yml` (upstream) | Root build and check | All PRs |
 
@@ -57,8 +69,8 @@ narrow one (80x40) and a short one (140x20). Example harnesses from phase 1 are 
 ## Changing skills
 
 Never edit `apps/makora/skills/`. Change `apps/makora/skills-src/` (the adapter or an overlay), then run
-`node apps/makora/scripts/sync-skills.mjs` and commit the tree and the lock together. When makora gains a tool, update
-the adapter's rows in the same PR.
+`node apps/makora/scripts/sync-skills.mjs` and commit the tree and the lock together. When makora gains a tool or a
+REPL helper, update the adapter's rows in the same PR.
 
 ## Pulling from upstream Pi
 
@@ -75,7 +87,8 @@ behavior in `packages/ai` and one path in `scripts/check-pinned-deps.mjs`), so m
 
 - One concept per file, a first-line comment saying what it is for, exported functions documented.
 - Validate only at trust boundaries: `auth.json`, `settings.json`, `keybindings.json`, `meta.json`, SKILL.md
-  frontmatter, network responses. Trust internal types.
+  frontmatter, network responses, a kernel's tool arguments and `llm` schemas, stored `python` result details. Trust
+  internal types.
 - Stateful logic in typed models (reducers, tagged unions), not scattered flags.
 - Key handling only through binding ids.
 - Docs change in the same change as the behavior they describe; record decisions in [decisions.md](decisions.md).
