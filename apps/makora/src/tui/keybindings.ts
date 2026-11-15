@@ -17,6 +17,24 @@ export const MAKORA_KEYBINDINGS = {
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "expand cells" },
 	"app.agents": { defaultKeys: "ctrl+a", description: "agents" },
 	"app.model.select": { defaultKeys: "ctrl+l", description: "model" },
+	"app.diff": { defaultKeys: "ctrl+g", description: "diff" },
+	// The diff view's own keys; only that view reads them, so they may share keys with the editor's.
+	"app.diff.up": { defaultKeys: ["up", "k"], description: "up" },
+	"app.diff.down": { defaultKeys: ["down", "j"], description: "down" },
+	"app.diff.focusDiff": { defaultKeys: ["right", "enter"], description: "diff" },
+	"app.diff.focusList": { defaultKeys: "left", description: "list" },
+	"app.diff.pageUp": { defaultKeys: "pageUp", description: "page up" },
+	"app.diff.pageDown": { defaultKeys: "pageDown", description: "page down" },
+	"app.diff.nextHunk": { defaultKeys: "]", description: "next hunk" },
+	"app.diff.previousHunk": { defaultKeys: "[", description: "previous hunk" },
+	"app.diff.nextTab": { defaultKeys: "tab", description: "next tab" },
+	"app.diff.previousTab": { defaultKeys: "shift+tab", description: "previous tab" },
+	"app.diff.stage": { defaultKeys: "s", description: "stage" },
+	"app.diff.unstage": { defaultKeys: "u", description: "unstage" },
+	"app.diff.revert": { defaultKeys: "r", description: "revert" },
+	"app.diff.split": { defaultKeys: "v", description: "side by side" },
+	"app.diff.ask": { defaultKeys: "a", description: "ask" },
+	"app.diff.close": { defaultKeys: "escape", description: "back" },
 } as const satisfies KeybindingDefinitions;
 
 export type MakoraKeybinding = keyof typeof MAKORA_KEYBINDINGS;
@@ -47,6 +65,8 @@ const KEY_NAMES: Readonly<Record<string, string>> = {
 	right: "→",
 	enter: "enter",
 	return: "enter",
+	pageUp: "PgUp",
+	pageDown: "PgDn",
 };
 
 /** How a key is shown in a hint: `esc`, `ctrl+o`, `↑`. */

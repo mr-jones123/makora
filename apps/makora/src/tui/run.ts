@@ -1,4 +1,5 @@
-// The TUI's composition root: builds layout A and the agents view, opens sessions, and routes keys and commands.
+// The TUI's composition root: builds layout A, the agents view and the diff view, opens sessions, and routes keys and
+// commands.
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -22,7 +23,7 @@ import type { SessionChoice } from "../cli-args.ts";
 import { FAKE_MODEL } from "../models.ts";
 import { tildify } from "../paths.ts";
 import { gitBranch } from "../project.ts";
-import { openSession } from "../session.ts";
+import { type MakoraSession, openEphemeralSession, openSession } from "../session.ts";
 import { createSession, latestSession, listSessions, readSession, type SessionMeta } from "../sessions.ts";
 import { discoverSkills, type Skill } from "../skills.ts";
 import { type AccountLabel, accountLabel } from "./account-label.ts";
@@ -30,6 +31,7 @@ import { type AgentRow, AgentsView, loadAgentRows } from "./agents.ts";
 import { dockLine, hintLine, Line, rule, statusLine, topBar } from "./bars.ts";
 import { type CommandHost, pickSession, runCommand, slashCommands } from "./commands.ts";
 import { Dialogs } from "./dialogs.ts";
+import { DiffView } from "./diff-view.ts";
 import { installKeybindings, keyName, MAKORA_KEYBINDINGS, type MakoraKeybinding } from "./keybindings.ts";
 import { RoundedEditor } from "./rounded-editor.ts";
 import { SessionFeed } from "./session-feed.ts";
@@ -43,6 +45,8 @@ export interface TuiOptions {
 	readonly cwd: string;
 	readonly session: SessionChoice;
 	readonly model?: ModelRef;
+	/** Keep sessions in memory only: no session files, no snapshots (`--ephemeral`). */
+	readonly ephemeral: boolean;
 }
 
 /** Run the TUI until the user exits; returns the exit code. */
@@ -68,6 +72,7 @@ const APP_KEYS: readonly (readonly [MakoraKeybinding, KeyAction])[] = [
 	["app.tools.expand", (tui) => tui.dispatch({ type: "toggleExpanded" })],
 	["app.agents", (tui) => tui.openAgents()],
 	["app.model.select", (tui) => tui.command("/model")],
+	["app.diff", (tui) => tui.openDiff()],
 ];
 
 class MakoraTui implements CommandHost {
@@ -81,6 +86,7 @@ class MakoraTui implements CommandHost {
 	readonly #mainRoot: Component;
 	readonly #agentsRoot: Component;
 	readonly #agentsView: AgentsView;
+	readonly #diffView: DiffView;
 	readonly #branch: string | undefined;
 	readonly #skills: Skill[];
 	readonly #exit = Promise.withResolvers<number>();
@@ -161,7 +167,7 @@ class MakoraTui implements CommandHost {
 				move: (delta) =>
 					this.dispatch({ type: "moveSelection", delta, order: this.#agentRows.map((row) => row.conversationId) }),
 				open: () => this.#openSelectedAgent(),
-				back: () => this.#closeAgents(),
+				back: () => this.#closeView(),
 			},
 		);
 		this.#agentsRoot = new VStack([
@@ -171,6 +177,22 @@ class MakoraTui implements CommandHost {
 			rule(),
 			new Line(() => this.#agentsView.hint()),
 		]);
+		this.#diffView = new DiffView({
+			rows: () => this.#tui.terminal.rows,
+			render: () => this.#tui.requestRender(),
+			close: () => this.#closeView(),
+			ask: (text) => {
+				this.#closeView();
+				this.#editor.insertTextAtCursor(text);
+			},
+			confirm: async (title, action) =>
+				(
+					await this.dialogs.select(title, [
+						{ value: "confirm", label: action },
+						{ value: "cancel", label: "Cancel" },
+					])
+				)?.value === "confirm",
+		});
 	}
 
 	async run(): Promise<number> {
@@ -182,11 +204,16 @@ class MakoraTui implements CommandHost {
 		const planTimer = setInterval(() => void this.#refreshPlanUsage(), PLAN_USAGE_MS);
 		let code: number;
 		try {
-			const meta = await this.#initialSession();
-			if (meta === undefined) code = 0;
-			else {
-				await this.#open(meta, this.#options.model);
+			if (this.#options.ephemeral) {
+				await this.#adopt(new SessionFeed(await this.#openEphemeral(this.#options.model)));
 				code = await this.#exit.promise;
+			} else {
+				const meta = await this.#initialSession();
+				if (meta === undefined) code = 0;
+				else {
+					await this.#open(meta, this.#options.model);
+					code = await this.#exit.promise;
+				}
 			}
 		} catch (error) {
 			this.#tui.stop();
@@ -216,16 +243,33 @@ class MakoraTui implements CommandHost {
 		this.#scroll.scrollToEnd();
 	}
 
+	/** Open `meta`, or a new session when undefined: in memory when makora was started with `--ephemeral`. */
 	async switchSession(meta: SessionMeta | undefined): Promise<void> {
 		const previous = this.#feed;
-		const next = meta ?? createSession(this.app.paths.sessions, this.#options.cwd);
 		try {
-			const session = await openSession(this.app, next, {}, BACKGROUND_CONTEXT);
+			const session =
+				meta === undefined && this.#options.ephemeral
+					? await this.#openEphemeral(undefined)
+					: await openSession(
+							this.app,
+							meta ?? createSession(this.app.paths.sessions, this.#options.cwd),
+							{},
+							BACKGROUND_CONTEXT,
+						);
 			await this.#closeFeed();
 			await this.#adopt(new SessionFeed(session));
 		} catch (error) {
 			if (previous === this.#feed) this.notice(describeError(error));
 		}
+	}
+
+	#openEphemeral(model: ModelRef | undefined): Promise<MakoraSession> {
+		return openEphemeralSession(
+			this.app,
+			this.#options.cwd,
+			model === undefined ? {} : { model },
+			BACKGROUND_CONTEXT,
+		);
 	}
 
 	async submit(text: string): Promise<void> {
@@ -279,6 +323,14 @@ class MakoraTui implements CommandHost {
 		this.#tui.setLayoutRoot(this.#agentsRoot);
 		this.#tui.setFocus(this.#agentsView);
 		void this.#loadAgents();
+		return true;
+	}
+
+	openDiff(): boolean {
+		this.dispatch({ type: "openDiff" });
+		this.#diffView.open(this.#feed?.state.cwd ?? this.#options.cwd);
+		this.#tui.setLayoutRoot(this.#diffView);
+		this.#tui.setFocus(this.#diffView);
 		return true;
 	}
 
@@ -426,13 +478,13 @@ class MakoraTui implements CommandHost {
 	#openSelectedAgent(): void {
 		const selected = this.#ui.view.kind === "agents" ? this.#ui.view.selected : undefined;
 		const root = this.#feed?.session.root.id;
-		this.#closeAgents();
+		this.#closeView();
 		if (selected !== undefined && selected !== root)
 			this.info("Only the main conversation can be opened in phase 1.");
 	}
 
-	#closeAgents(): void {
-		this.dispatch({ type: "closeAgents" });
+	#closeView(): void {
+		this.dispatch({ type: "closeView" });
 		this.#tui.setLayoutRoot(this.#mainRoot);
 		this.#tui.setFocus(this.#editor);
 	}
@@ -496,7 +548,13 @@ class MakoraTui implements CommandHost {
 			: live?.compactionFailure
 				? "compaction failed"
 				: "auto-compact on";
-		return dockLine({ running: state?.running ?? 0, waiting: state?.waiting ?? 0, worktrees: 0, context });
+		return dockLine({
+			running: state?.running ?? 0,
+			waiting: state?.waiting ?? 0,
+			worktrees: 0,
+			context,
+			...(state?.kernel === undefined ? {} : { kernel: state.kernel }),
+		});
 	}
 
 	#status(width: number): string {
@@ -523,7 +581,13 @@ class MakoraTui implements CommandHost {
 			const cancel = keys.getKeys("app.cancel")[0];
 			return theme.warning(`press ${cancel === undefined ? "it" : keyName(cancel)} again to exit`);
 		}
-		const ids: readonly MakoraKeybinding[] = ["app.interrupt", "app.tools.expand", "app.agents", "app.model.select"];
+		const ids: readonly MakoraKeybinding[] = [
+			"app.interrupt",
+			"app.tools.expand",
+			"app.agents",
+			"app.diff",
+			"app.model.select",
+		];
 		return hintLine(ids.map((id) => [keys.getKeys(id).slice(0, 1), MAKORA_KEYBINDINGS[id].description] as const));
 	}
 
@@ -548,8 +612,17 @@ class MakoraTui implements CommandHost {
 	}
 
 	#splashHint(): string {
-		const agents = getKeybindings().getKeys("app.agents")[0];
-		return `/login  connect a model    /  commands${agents === undefined ? "" : `    ${keyName(agents)}  agents`}`;
+		const keys = getKeybindings();
+		const hints = [
+			"/login",
+			"/ commands",
+			...(["app.agents", "app.diff"] as const).flatMap((id) => {
+				const key = keys.getKeys(id)[0];
+				return key === undefined ? [] : [`${keyName(key)} ${MAKORA_KEYBINDINGS[id].description}`];
+			}),
+		];
+		// Kept narrower than the wordmark so it never widens the side-by-side splash.
+		return hints.join("   ");
 	}
 
 	/** Warns when bundled skills hide skills the user installed under the same names; undefined when none do. */

@@ -1,6 +1,6 @@
 // Where makora keeps its state: the home directory and the files and directories under it.
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /** The files and directories of one makora home. */
 export interface HomePaths {
@@ -13,9 +13,10 @@ export interface HomePaths {
 	readonly skills: string;
 }
 
-/** Makora's home directory: `MAKORA_HOME`, or `~/.makora`. */
+/** Makora's home directory, absolute: `MAKORA_HOME` resolved against the cwd, or `~/.makora`. */
 export function makoraHome(): string {
-	return process.env.MAKORA_HOME ?? join(homedir(), ".makora");
+	// Kernels run in the conversation's cwd, so a relative blob directory under the home would point elsewhere.
+	return process.env.MAKORA_HOME === undefined ? join(homedir(), ".makora") : resolve(process.env.MAKORA_HOME);
 }
 
 /** The files and directories under `home`. */

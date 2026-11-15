@@ -1,5 +1,7 @@
 // The one-row bars around the transcript: top bar, activity dock, status row, hint rows, and rules.
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { describeExit } from "../kernel/kernel.ts";
+import type { KernelStatus } from "../kernel/manager.ts";
 import type { AccountLabel } from "./account-label.ts";
 import { keyName } from "./keybindings.ts";
 import { theme } from "./theme.ts";
@@ -55,17 +57,39 @@ export interface Dock {
 	readonly worktrees: number;
 	/** Context and compaction state, such as `auto-compact on` or `compacting`. */
 	readonly context: string;
+	/** The root conversation's Python kernel; shown once one started. */
+	readonly kernel?: KernelStatus;
 }
 
-/** `◆ N running · ◌ N waiting · N worktrees · <context>`. */
+/** `◆ N running · ◌ N waiting · N worktrees · <kernel> · <context>`. */
 export function dockLine(dock: Dock): string {
 	const running = `◆ ${dock.running} running`;
+	const kernel = dock.kernel === undefined ? undefined : kernelLabel(dock.kernel);
 	return [
 		dock.running > 0 ? theme.success(running) : theme.muted(running),
 		theme.muted(`◌ ${dock.waiting} waiting`),
 		theme.muted(`${dock.worktrees} worktrees`),
+		...(kernel === undefined ? [] : [dock.kernel?.state === "dead" ? theme.warning(kernel) : theme.muted(kernel)]),
 		theme.muted(dock.context),
 	].join(theme.dim(" · "));
+}
+
+/** `py running 3 vars @ cell 7 45 MB`, `py dead (exit 137)`, or undefined before a kernel started. */
+export function kernelLabel(status: KernelStatus): string | undefined {
+	switch (status.state) {
+		case "none":
+			return undefined;
+		case "starting":
+			return "py starting";
+		case "dead":
+			return `py dead${status.exit === undefined ? "" : ` (${describeExit(status.exit)})`}`;
+		case "running":
+		case "restored": {
+			const saved = status.snapshotCell === undefined ? "" : ` @ cell ${status.snapshotCell}`;
+			const memory = status.peakRssBytes === undefined ? "" : ` ${Math.round(status.peakRssBytes / 1e6)} MB`;
+			return `py ${status.state} ${status.variables} vars${saved}${memory}`;
+		}
+	}
 }
 
 /** The status row's data. */

@@ -19,6 +19,8 @@ export type CliCommand =
 			/** Print mode's prompt; absent for the TUI. */
 			readonly prompt?: string;
 			readonly fake: boolean;
+			/** Keep the session in memory: no session directory, no snapshots. */
+			readonly ephemeral: boolean;
 			readonly model?: ModelRef;
 	  }
 	| { readonly kind: "error"; readonly message: string };
@@ -33,6 +35,7 @@ export const USAGE = `Usage:
 
 Options:
   --fake                       scripted fake model (also MAKORA_FAKE=1)
+  --ephemeral                  keep the session in memory only
   --model <provider/id>        model for this session
   -h, --help                   show this help`;
 
@@ -41,6 +44,7 @@ export function parseCli(argv: readonly string[], fakeEnv: string | undefined): 
 	let session: SessionChoice = { kind: "new" };
 	let prompt: string | undefined;
 	let fake = fakeEnv === "1";
+	let ephemeral = false;
 	let model: ModelRef | undefined;
 	for (let index = 0; index < argv.length; index++) {
 		const arg = argv[index]!;
@@ -76,6 +80,9 @@ export function parseCli(argv: readonly string[], fakeEnv: string | undefined): 
 			case "--fake":
 				fake = true;
 				break;
+			case "--ephemeral":
+				ephemeral = true;
+				break;
 			case "--model": {
 				const next = argv[index + 1];
 				const parsed = next === undefined ? undefined : parseModelRef(next);
@@ -88,10 +95,14 @@ export function parseCli(argv: readonly string[], fakeEnv: string | undefined): 
 				return { kind: "error", message: `Unknown argument: ${arg}` };
 		}
 	}
+	if (ephemeral && session.kind !== "new") {
+		return { kind: "error", message: "--ephemeral starts a new session; it cannot continue or resume one" };
+	}
 	return {
 		kind: "run",
 		session,
 		fake,
+		ephemeral,
 		...(prompt === undefined ? {} : { prompt }),
 		...(model === undefined ? {} : { model }),
 	};

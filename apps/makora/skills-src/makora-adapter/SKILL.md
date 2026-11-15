@@ -1,6 +1,6 @@
 ---
 name: makora-adapter
-description: Maps the Cursor names in pstack skills to Makora's phase 1 tools, paths, and limits. pstack skills read it once per session; poteto-mode embeds it.
+description: Maps the Cursor names in pstack skills to Makora's Python REPL helpers, paths, and limits. pstack skills read it once per session; poteto-mode embeds it.
 disable-model-invocation: true
 ---
 
@@ -8,22 +8,22 @@ disable-model-invocation: true
 
 pstack skills use Cursor names. In Makora, read this once per session, then map each Cursor name in a pstack skill with the tables below. When this text arrives embedded in `poteto-mode`, it is already read. Do not read it again. `<pstack>` means the folder that holds the bundled skills, one level up from the skill file you are reading. If a Cursor field has no row, drop it and say so.
 
-Makora phase 1 gives you four tools: `read`, `write`, `edit`, and `bash`. It has no subagents, no todo tool, no question tool, and no web tool. When a step needs something Makora lacks, put one line in your reply, `Skipped in Makora: <step>. <reason>.`, then do the work yourself where you can and go on. Do not stop, ask, or retry. When a later step needs what the skipped step made, such as a URL or a key, leave a placeholder and name it in the line.
+Makora gives you one tool, `python`: a persistent Python REPL whose cells call `await read(...)`, `await write(...)`, `await edit(...)`, `await bash(...)`, and `await llm(...)`. Each helper call runs through Durable and is recorded. Makora has no subagents yet, no todo tool, no question tool, and no web tool. When a step needs something Makora lacks, put one line in your reply, `Skipped in Makora: <step>. <reason>.`, then do the work yourself where you can and go on. Do not stop, ask, or retry. When a later step needs what the skipped step made, such as a URL or a key, leave a placeholder and name it in the line.
 
 ## Tools
 
 | Cursor | Makora |
 | --- | --- |
-| `Task` | No subagents in phase 1. See Subagents. |
+| `Task` | No subagents yet. See Subagents. |
 | `AskQuestion` | Ask in plain text and end your turn to wait for the answer. |
 | Open a todolist | Keep a short checklist in your reply and update it at each phase. |
 | Run another pstack skill (`/name` or "the **name** skill") | Read `<pstack>/<name>/SKILL.md` and follow it, unless its body is already in context from `/skill:<name>` or an earlier read. When you tell the user to type it, write `/skill:<name>`. |
-| `Read`, `Write`, `StrReplace`, `Shell`, `Grep`, `Glob` | `read`, `write`, `edit`, `bash`, then `bash` with `rg` for both `Grep` and `Glob` (`rg --files -g '<glob>'` lists files). |
-| `WebFetch`, `WebSearch` | `bash` with `curl` for a known URL. Search is unavailable, so say so. |
+| `Read`, `Write`, `StrReplace`, `Shell`, `Grep`, `Glob` | In a `python` cell: `await read(path)`, `await write(path, content)`, `await edit(path, old, new)`, `await bash(command)`, then `await bash("rg <pattern>")` for `Grep` and `await bash("rg --files -g '<glob>'")` for `Glob`. Keep long results in variables and print what you need. |
+| `WebFetch`, `WebSearch` | `await bash("curl -sL <url>")` for a known URL. Search is unavailable, so say so. |
 
 ## Subagents
 
-Makora phase 1 has no subagents. Subagents arrive in a later phase. When a step spawns a `Task`, do that seat's work yourself in this conversation, one seat after another, and keep each seat's output under its own heading. Write `Skipped in Makora: <step>. No subagents in phase 1.` when the step's value comes from independence that inline work cannot give: a second model's opinion, a blind reviewer, a parallel race, or a seat that must not see the others' work. Never present your own inline review as an independent one.
+Makora has no subagents yet. Subagents arrive in phase 3. When a step spawns a `Task`, do that seat's work yourself in this conversation, one seat after another, and keep each seat's output under its own heading. Write `Skipped in Makora: <step>. No subagents yet.` when the step's value comes from independence that inline work cannot give: a second model's opinion, a blind reviewer, a parallel race, or a seat that must not see the others' work. Never present your own inline review as an independent one.
 
 | Cursor | Makora |
 | --- | --- |
@@ -35,7 +35,7 @@ Makora phase 1 has no subagents. Subagents arrive in a later phase. When a step 
 | `cloud_base_branch: <b>` | Base the worktree on `<b>`. |
 | `run_in_background: true` | Drop it. Run the seats one after another. |
 | `resume` | Drop it. Continue the earlier seat's work inline from its notes. |
-| `file_attachments` | Read each file with `read` before the seat's work. |
+| `file_attachments` | Read each file with `await read(path)` before the seat's work. |
 
 ## Models
 
@@ -70,7 +70,7 @@ Makora has no Cursor Automations, Bugbot, Cursor cloud agents, persistent `/loop
 | Cursor Automations: routines, `update_state` routine calls, automation webhooks, routine wakes, and `SendToUser` secret requests | Skip with the line. |
 | Bugbot | Bugbot comments on a GitHub PR are ordinary review threads, so triage them with the forge command the step gives. When the PR has no Bugbot check or comment, skip with the line any step that kicks off, awaits, or sets up Bugbot. |
 | Cursor cloud agents | `environment: "cloud"` maps as in Subagents. Skip a step that needs the cloud agent itself, such as its dashboard. |
-| A built-in PR tool | Use the forge command the step gives, such as `gh pr create`, through `bash`. That is not a skip, so write no line. |
+| A built-in PR tool | Use the forge command the step gives, such as `gh pr create`, through `await bash(...)`. That is not a skip, so write no line. |
 | `/loop` | Keep working in this session until the predicate holds. Makora phase 1 has no wake scheduler, so say so when the task needs one. |
 | A custom mode that stays on across turns | Skip with the line. The user types `/skill:poteto-mode` again when they want the mode again. |
 | `/visualize` | Draw the diagram as a Mermaid block in the reply. |
@@ -78,4 +78,4 @@ Makora has no Cursor Automations, Bugbot, Cursor cloud agents, persistent `/loop
 
 ## Helper limits
 
-`poteto-mode/scripts/worktree-audit.sh` decides liveness from Cursor transcripts, so this copy exits 2 before it audits anything. Use `git worktree list`, then check each checkout's status and its unpushed commits. Unknown liveness means keep the checkout. Other helpers keep their own protocols, such as internal `gh --json` calls. Read a helper before you run it.
+`poteto-mode/scripts/worktree-audit.sh` decides liveness from Cursor transcripts, so this copy exits 2 before it audits anything. Use `await bash("git worktree list")`, then check each checkout's status and its unpushed commits. Unknown liveness means keep the checkout. Other helpers keep their own protocols, such as internal `gh --json` calls. Read a helper before you run it.

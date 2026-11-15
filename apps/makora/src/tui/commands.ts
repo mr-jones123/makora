@@ -27,6 +27,8 @@ export interface CommandHost {
 	submit(text: string): Promise<void>;
 	/** Re-read the account label and the feed's derived state. */
 	refreshStatus(): void;
+	/** Show the diff view of the session's directory. */
+	openDiff(): void;
 	exit(): void;
 }
 
@@ -44,6 +46,10 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 	thinking: { description: "Choose the thinking level", run: chooseThinking },
 	new: { description: "Start a new session in this directory", run: (host) => host.switchSession(undefined) },
 	resume: { description: "Resume another session", run: resume },
+	diff: {
+		description: "Show git changes and history; stage, revert, ask about a line",
+		run: async (host) => host.openDiff(),
+	},
 	compact: {
 		description: "Compact the context, with optional instructions",
 		run: async (host, args) => {

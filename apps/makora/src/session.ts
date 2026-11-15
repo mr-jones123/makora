@@ -1,11 +1,16 @@
-// One open session: its lock, its Durable harness over `session.sqlite`, and the root conversation the user talks to.
+// One open session: its lock, its Durable harness over `session.sqlite` (or memory, when ephemeral), the root
+// conversation the user talks to, and the Python kernels of its conversations.
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
+import { uuidv7 } from "@earendil-works/pi-ai";
 import {
 	type Conversation,
 	createRegistry,
 	Harness,
+	MemoryStorage,
 	type ModelRef,
 	type Report,
+	type Storage,
 	type Submission,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -13,7 +18,17 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { defaultModel, type MakoraApp } from "./app.ts";
 import { makoraExtension } from "./extension.ts";
-import { lockSession, type SessionMeta, sessionDatabase, updateSession } from "./sessions.ts";
+import { KernelManager } from "./kernel/manager.ts";
+import { createRepl, type Repl } from "./repl/extension.ts";
+import type { SnapshotPolicy } from "./repl/python-tool.ts";
+import {
+	lockSession,
+	type SessionLock,
+	type SessionMeta,
+	sessionDatabase,
+	sessionDir,
+	updateSession,
+} from "./sessions.ts";
 
 /** A notice for the user about the session itself: restored work and harness failures. */
 export interface SessionNotice {
@@ -25,8 +40,10 @@ export interface SessionNotice {
 export interface MakoraSession {
 	readonly harness: Harness;
 	readonly root: Conversation;
-	/** The session's current meta. */
+	/** The session's current meta; an ephemeral session's is never written. */
 	readonly meta: SessionMeta;
+	/** The Python kernels of the session's conversations. */
+	readonly kernels: KernelManager;
 	/** Notices so far, oldest first. */
 	readonly notices: readonly SessionNotice[];
 	/** Call `listener` with each later notice; returns the unsubscribe. */
@@ -35,9 +52,20 @@ export interface MakoraSession {
 	submit(text: string, context: Context): Promise<Submission>;
 	/** Switch the root conversation's model, and record it in the meta. */
 	setModel(model: ModelRef, context: Context): Promise<void>;
-	/** Close the harness and release the lock. */
+	/** Close the harness, stop the kernels, and release the lock. */
 	close(): Promise<void>;
 }
+
+/** What an open applies on top of the session's stored state. */
+export interface OpenOptions {
+	readonly model?: ModelRef;
+}
+
+/** Where a session's state lives. */
+type SessionStore =
+	| { readonly kind: "persistent"; readonly sessionsDir: string }
+	/** Durable's `MemoryStorage`: no session directory, no meta, no snapshots. */
+	| { readonly kind: "ephemeral" };
 
 const TITLE_LENGTH = 80;
 
@@ -45,14 +73,35 @@ const TITLE_LENGTH = 80;
  * Open the session `meta` for writing: take its lock, open its harness, make sure the root conversation exists with
  * the default model, apply `model` when given, and resume work an earlier process left unfinished.
  */
-export async function openSession(
+export function openSession(
 	app: MakoraApp,
 	meta: SessionMeta,
-	options: { readonly model?: ModelRef },
+	options: OpenOptions,
 	context: Context,
 ): Promise<MakoraSession> {
-	const sessions = app.paths.sessions;
-	const lock = lockSession(sessions, meta.id);
+	return open(app, meta, { kind: "persistent", sessionsDir: app.paths.sessions }, options, context);
+}
+
+/** Open a new session for `cwd` that lives in memory only and leaves nothing on disk but what its tools write. */
+export function openEphemeralSession(
+	app: MakoraApp,
+	cwd: string,
+	options: OpenOptions,
+	context: Context,
+): Promise<MakoraSession> {
+	const now = Date.now();
+	return open(app, { id: uuidv7(now), cwd, createdAt: now, updatedAt: now }, { kind: "ephemeral" }, options, context);
+}
+
+async function open(
+	app: MakoraApp,
+	meta: SessionMeta,
+	store: SessionStore,
+	options: OpenOptions,
+	context: Context,
+): Promise<MakoraSession> {
+	const lock: SessionLock | undefined =
+		store.kind === "persistent" ? lockSession(store.sessionsDir, meta.id) : undefined;
 	const notices: SessionNotice[] = [];
 	const listeners = new Set<(notice: SessionNotice) => void>();
 	const notify = (message: string): void => {
@@ -60,13 +109,24 @@ export async function openSession(
 		notices.push(notice);
 		for (const listener of listeners) listener(notice);
 	};
+	const dir = store.kind === "persistent" ? sessionDir(store.sessionsDir, meta.id) : undefined;
+	let kernels: KernelManager;
+	let repl: Repl;
 	let harness: Harness;
 	try {
+		// Under the lock, so the kernels it kills can only be ones a crashed holder left.
+		kernels = new KernelManager(app.paths.home, dir === undefined ? undefined : join(dir, "kernels"));
+		repl = createRepl({ kernels, snapshots: snapshotPolicy(app, meta, dir), defaultCwd: meta.cwd });
 		const registry = createRegistry();
 		registry.install(CodingTools);
 		registry.install(makoraExtension(app.paths));
+		registry.install(repl.extension);
+		const storage: Storage =
+			store.kind === "persistent"
+				? await openNodeSqliteStorage(sessionDatabase(store.sessionsDir, meta.id))
+				: new MemoryStorage();
 		harness = await Harness.open(
-			await openNodeSqliteStorage(sessionDatabase(sessions, meta.id)),
+			storage,
 			{
 				models: app.models,
 				registry,
@@ -80,9 +140,13 @@ export async function openSession(
 			context,
 		);
 	} catch (error) {
-		lock.release();
+		lock?.release();
 		throw error;
 	}
+	const update = (current: SessionMeta, change: Partial<Pick<SessionMeta, "title" | "model">>): SessionMeta =>
+		store.kind === "persistent"
+			? updateSession(store.sessionsDir, current, change)
+			: { ...current, ...change, updatedAt: Date.now() };
 	let root: Conversation;
 	let current = meta;
 	try {
@@ -90,10 +154,16 @@ export async function openSession(
 		root = await harness.root(context, {
 			agent: {
 				cwd: meta.cwd,
+				modelTools: [repl.python],
 				...(initial === undefined ? {} : { model: initial }),
 				...(app.settings.thinkingLevel === undefined ? {} : { thinkingLevel: app.settings.thinkingLevel }),
 			},
 		});
+		// Sessions from before the REPL offered the coding tools to the model; the model now gets `python` only.
+		const offered = (await root.agent(context)).tools;
+		if (offered.length !== 1 || offered[0]?.name !== repl.python.name) {
+			await root.configure({ modelTools: [repl.python] }, context);
+		}
 		if (options.model !== undefined) await root.configure({ model: options.model }, context);
 		const unfinished = (await harness.inspect(context)).tasks.filter(
 			(task) => task.record.conversationId === root.id,
@@ -102,12 +172,12 @@ export async function openSession(
 		harness.resume();
 
 		const model = (await root.agent(context)).model;
-		if (model !== undefined)
-			current = updateSession(sessions, current, { model: `${model.provider}/${model.modelId}` });
+		if (model !== undefined) current = update(current, { model: `${model.provider}/${model.modelId}` });
 	} catch (error) {
 		// The open failure is the error to report; a failing close must not replace it.
 		await harness.close(BACKGROUND_CONTEXT).catch(() => {});
-		lock.release();
+		await kernels.close();
+		lock?.release();
 		throw error;
 	}
 
@@ -117,6 +187,7 @@ export async function openSession(
 		get meta() {
 			return current;
 		},
+		kernels,
 		notices,
 		onNotice(listener) {
 			listeners.add(listener);
@@ -125,20 +196,31 @@ export async function openSession(
 		async submit(text, submitContext) {
 			const submission = await root.submit({ type: "input", content: text }, submitContext);
 			const title = current.title ?? (text.trim().split("\n")[0]?.slice(0, TITLE_LENGTH) || undefined);
-			current = updateSession(sessions, current, title === undefined ? {} : { title });
+			current = update(current, title === undefined ? {} : { title });
 			return submission;
 		},
 		async setModel(next, modelContext) {
 			await root.configure({ model: next }, modelContext);
-			current = updateSession(sessions, current, { model: `${next.provider}/${next.modelId}` });
+			current = update(current, { model: `${next.provider}/${next.modelId}` });
 		},
 		async close() {
 			try {
 				await harness.close(BACKGROUND_CONTEXT);
 			} finally {
-				lock.release();
+				await kernels.close();
+				lock?.release();
 			}
 		},
+	};
+}
+
+function snapshotPolicy(app: MakoraApp, meta: SessionMeta, dir: string | undefined): SnapshotPolicy {
+	if (dir === undefined) return { kind: "off" };
+	return {
+		kind: "session",
+		sessionId: meta.id,
+		blobDir: join(dir, "blobs"),
+		enabled: () => app.settings.snapshots,
 	};
 }
 

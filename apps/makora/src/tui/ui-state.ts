@@ -5,7 +5,9 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 export type View =
 	| { readonly kind: "main" }
 	/** The agents view; `selected` is undefined until the rows are known, then the root's conversation. */
-	| { readonly kind: "agents"; readonly selected: ConversationId | undefined };
+	| { readonly kind: "agents"; readonly selected: ConversationId | undefined }
+	/** The diff view, which keeps its own state (`diff-state.ts`). */
+	| { readonly kind: "diff" };
 
 /** The TUI's state. */
 export interface UiState {
@@ -18,7 +20,9 @@ export interface UiState {
 export type UiAction =
 	| { readonly type: "toggleExpanded" }
 	| { readonly type: "openAgents" }
-	| { readonly type: "closeAgents" }
+	| { readonly type: "openDiff" }
+	/** Back to the main screen from a full-screen view. */
+	| { readonly type: "closeView" }
 	/** Move the agents view's selection by `delta` rows within `order`, the rows' display order. */
 	| { readonly type: "moveSelection"; readonly delta: number; readonly order: readonly ConversationId[] };
 
@@ -32,7 +36,9 @@ export function reduceUi(state: UiState, action: UiAction): UiState {
 			return { ...state, expanded: !state.expanded };
 		case "openAgents":
 			return { ...state, view: { kind: "agents", selected: undefined } };
-		case "closeAgents":
+		case "openDiff":
+			return { ...state, view: { kind: "diff" } };
+		case "closeView":
 			return { ...state, view: { kind: "main" } };
 		case "moveSelection": {
 			if (state.view.kind !== "agents" || action.order.length === 0) return state;

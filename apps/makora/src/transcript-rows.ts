@@ -1,7 +1,8 @@
 // Transcript rows: a conversation's committed entries and live state turned into the rows a transcript shows.
 import type { AssistantMessage, Message, ToolResultMessage } from "@earendil-works/pi-ai";
-import type { EntryRecord, LiveState, ToolSlot } from "@earendil-works/pi-durable";
-import type { ToolCell, ToolCellStatus } from "./tool-cell.ts";
+import type { EntryRecord, LiveState, NestedToolSlot, ToolSlot } from "@earendil-works/pi-durable";
+import { pythonDetails } from "./repl/details.ts";
+import type { NestedCell, ToolCell, ToolCellStatus } from "./tool-cell.ts";
 
 /** One row of a transcript, in display order. */
 export type TranscriptRow =
@@ -27,13 +28,30 @@ export function transcriptRows<Extra = never>(
 		if (message?.role === "toolResult") results.set(message.toolCallId, message);
 	}
 	const slots = new Map<string, ToolSlot>((live?.tools ?? []).map((slot) => [slot.callId, slot]));
+	const running: Running = { slots, nested: nestedByCaller(live?.nestedTools ?? []) };
 	const rows: (TranscriptRow | Extra)[] = [];
 	for (const entry of entries) {
-		rows.push(...entryRows(entry, results, slots));
+		rows.push(...entryRows(entry, results, running));
 		if (after !== undefined) rows.push(...after(entry));
 	}
-	rows.push(...liveRows(live, slots));
+	rows.push(...liveRows(live, running));
 	return rows;
+}
+
+/** The live state of the current tool round: each call's slot, and the nested calls each call made. */
+type Running = {
+	readonly slots: ReadonlyMap<string, ToolSlot>;
+	readonly nested: ReadonlyMap<string, readonly NestedToolSlot[]>;
+};
+
+function nestedByCaller(nested: readonly NestedToolSlot[]): Map<string, NestedToolSlot[]> {
+	const byCaller = new Map<string, NestedToolSlot[]>();
+	for (const slot of nested) {
+		const list = byCaller.get(slot.parentCallId) ?? [];
+		list.push(slot);
+		byCaller.set(slot.parentCallId, list);
+	}
+	return byCaller;
 }
 
 /** The text blocks of a message joined, or its string content. */
@@ -48,12 +66,16 @@ export function responseEnd(message: AssistantMessage): number {
 	return message.timestamp + (message.durationMs ?? 0);
 }
 
-/** A tool call's cell from its call, its result if committed, and its live slot if any. */
+/**
+ * A tool call's cell from its call, its result if committed, and its live slot and nested calls if any. A python
+ * cell's number and nested calls come from its details: the running ones while it runs, the result's after.
+ */
 export function toolCellOf(
 	call: { readonly id: string; readonly name: string; readonly arguments: Readonly<Record<string, unknown>> },
 	startedAt: number,
 	result: ToolResultMessage | undefined,
 	slot: ToolSlot | undefined,
+	nested: readonly NestedToolSlot[] = [],
 ): ToolCell {
 	const base = { callId: call.id, name: call.name, args: call.arguments };
 	if (result !== undefined) {
@@ -62,19 +84,50 @@ export function toolCellOf(
 			isError: result.isError,
 			durationMs: result.timestamp - startedAt,
 		};
-		return { ...base, status, output: messageText(result) };
+		const details = pythonDetails(result.details);
+		const calls = (details?.calls ?? []).map(
+			(each): NestedCell => ({
+				name: each.name,
+				args: each.args,
+				status: {
+					kind: "done",
+					isError: each.isError,
+					...(each.durationMs === undefined ? {} : { durationMs: each.durationMs }),
+				},
+			}),
+		);
+		return { ...base, status, output: messageText(result), ...cellFields(details?.kernel.cell, calls) };
 	}
+	const calls = nested.map(
+		(each): NestedCell => ({
+			name: each.name,
+			args: each.arguments,
+			status:
+				each.summary === undefined
+					? slotStatus(each, startedAt)
+					: {
+							kind: "done",
+							isError: each.summary.isError,
+							...(each.summary.durationMs === undefined ? {} : { durationMs: each.summary.durationMs }),
+						},
+		}),
+	);
 	return {
 		...base,
 		status: slotStatus(slot, startedAt),
 		...(slot?.output === undefined ? {} : { output: slot.output }),
+		...cellFields(pythonDetails(slot?.details)?.kernel.cell, calls),
 	};
+}
+
+function cellFields(cell: number | undefined, nested: readonly NestedCell[]): Pick<ToolCell, "cell" | "nested"> {
+	return { ...(cell === undefined ? {} : { cell }), ...(nested.length === 0 ? {} : { nested }) };
 }
 
 function entryRows(
 	entry: EntryRecord,
 	results: ReadonlyMap<string, ToolResultMessage>,
-	slots: ReadonlyMap<string, ToolSlot>,
+	running: Running,
 ): TranscriptRow[] {
 	const key = String(entry.id);
 	switch (entry.kind) {
@@ -84,7 +137,7 @@ function entryRows(
 		}
 		case "pi.assistant": {
 			const message = entry.model?.[0];
-			return message?.role === "assistant" ? assistantRows(message, key, false, results, slots) : [];
+			return message?.role === "assistant" ? assistantRows(message, key, false, results, running) : [];
 		}
 		case "pi.compaction":
 			return [{ kind: "notice", key, message: "Context compacted: earlier turns were summarized." }];
@@ -100,7 +153,7 @@ function assistantRows(
 	key: string,
 	streaming: boolean,
 	results: ReadonlyMap<string, ToolResultMessage>,
-	slots: ReadonlyMap<string, ToolSlot>,
+	running: Running,
 ): TranscriptRow[] {
 	const rows: TranscriptRow[] = [];
 	const startedAt = responseEnd(message);
@@ -120,7 +173,13 @@ function assistantRows(
 			rows.push({
 				kind: "tool",
 				key: `tool:${block.id}`,
-				cell: toolCellOf(block, startedAt, results.get(block.id), slots.get(block.id)),
+				cell: toolCellOf(
+					block,
+					startedAt,
+					results.get(block.id),
+					running.slots.get(block.id),
+					running.nested.get(block.id),
+				),
 			});
 		}
 	});
@@ -135,11 +194,11 @@ function assistantRows(
 	return rows;
 }
 
-function liveRows(live: LiveState | undefined, slots: ReadonlyMap<string, ToolSlot>): TranscriptRow[] {
+function liveRows(live: LiveState | undefined, running: Running): TranscriptRow[] {
 	if (live === undefined) return [];
 	const rows: TranscriptRow[] = [];
 	const partial = live.generation?.message as AssistantMessage | undefined;
-	if (partial !== undefined) rows.push(...assistantRows(partial, "live", true, new Map(), slots));
+	if (partial !== undefined) rows.push(...assistantRows(partial, "live", true, new Map(), running));
 	const retry = live.generation?.retry;
 	if (retry !== undefined) {
 		rows.push({ kind: "notice", key: "live:retry", message: `Retrying after an error: ${retry.error}` });
@@ -188,7 +247,7 @@ const RUN_FAILURES: Readonly<Record<string, string>> = {
 	turn_limit: "The run reached its turn limit",
 };
 
-function slotStatus(slot: ToolSlot | undefined, startedAt: number): ToolCellStatus {
+function slotStatus(slot: Pick<ToolSlot, "status"> | undefined, startedAt: number): ToolCellStatus {
 	switch (slot?.status) {
 		case "running":
 			return { kind: "running", startedAt };

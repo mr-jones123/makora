@@ -1,12 +1,14 @@
 # makora
 
-A self-evolving agent harness for long-running tasks, built on [pi-durable](../../packages/durable). This is phase 1:
-the app skeleton. See [the docs](../../docs/README.md): [vision](../../docs/vision.md), [roadmap](../../docs/roadmap.md) and
+A self-evolving agent harness for long-running tasks, built on [pi-durable](../../packages/durable). Phases 1 and 2
+are built: the app skeleton, and a persistent Python REPL as the model's one tool, plus a `/diff` view. See
+[the docs](../../docs/README.md): [vision](../../docs/vision.md), [roadmap](../../docs/roadmap.md) and
 [decisions](../../docs/decisions.md).
 
 ## Run
 
-Requires Node 22.19+ and the monorepo's installed dependencies and model data. From the repository root:
+Requires Node 22.19+, the monorepo's installed dependencies and model data, and for the REPL either
+[uv](https://docs.astral.sh/uv/) or `python3` 3.11+ with `venv` and `pip`. From the repository root:
 
 ```sh
 npm install --ignore-scripts
@@ -25,10 +27,20 @@ npm start                      # TUI, new session in the current directory
 | `makora ls` | List sessions |
 | `makora -p "<prompt>"` | Print mode: streams the answer to stdout, tool calls to stderr, exit 1 when unanswered |
 | `--fake` | Uses a scripted fake model; no provider is called, but tools act on real files |
+| `--ephemeral` | Keeps the session in memory: no session files, no REPL snapshots |
 | `--model provider/id` | Model for this run |
 
-Data lives in `~/.makora` (`MAKORA_HOME` overrides it): `sessions/<id>/session.sqlite` per session, `auth.json`,
-`settings.json`, `keybindings.json`, and optional `AGENTS.md` and `skills/`.
+Data lives in `~/.makora` (`MAKORA_HOME` overrides it): `sessions/<id>/` per session (`session.sqlite`, REPL
+snapshot `blobs/`, kernel pid files), `python/venv` (the kernels' Python environment, built by the first cell),
+`auth.json`, `settings.json`, `keybindings.json`, and optional `AGENTS.md` and `skills/`.
+
+## The REPL
+
+The model is offered one tool, `python`: a persistent kernel per conversation whose cells call `await read(...)`,
+`write`, `edit`, `bash` and `llm`, each recorded by Durable. After each cell, variables and a git tree of the worktree
+are saved, so a crashed kernel or a restarted makora resumes with them. `src/kernel/` runs kernels, `src/repl/` is
+the tool, and `python/makora_rlm/` is the kernel's Python side. See
+[features/repl.md](../../docs/features/repl.md) and [architecture/repl.md](../../docs/architecture/repl.md).
 
 ## Login
 
@@ -50,3 +62,6 @@ binary is installed separately.
 npm run check                                              # biome + tsc for this app
 node --import ./src/source.ts --test test/<file>.test.ts   # one test file
 ```
+
+`test/kernel.test.ts` and `test/repl-print.test.ts` build a real Python environment, so they need uv or Python. See
+[development](../../docs/development.md).

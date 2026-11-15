@@ -1,6 +1,6 @@
 // The transcript component: draws the feed's rows, with one fixed summary line per tool call unless cells are expanded.
 import { type Component, Markdown, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { type ToolTone, toolSummary } from "../tool-cell.ts";
+import { type ToolCell, type ToolTone, toolSummary } from "../tool-cell.ts";
 import type { FeedRow } from "./session-feed.ts";
 import { markdownTheme, type Paint, theme } from "./theme.ts";
 
@@ -71,7 +71,7 @@ export class TranscriptView implements Component {
 				case "tool": {
 					const summary = toolSummary(row.cell, width, now, frame);
 					lines.push(`${TONES[summary.tone](summary.marker)} ${theme.text(summary.text)}`);
-					if (expanded) lines.push(...expandedCell(row.cell.args, row.cell.output, width));
+					if (expanded) lines.push(...expandedCell(row.cell, width, now, frame));
 					break;
 				}
 				case "notice":
@@ -93,8 +93,11 @@ function prefixed(first: string, rest: string, text: string, width: number, pain
 	return wrapTextWithAnsi(text, inner).map((line, index) => `${index === 0 ? first : rest}${paint(line)}`);
 }
 
-function expandedCell(args: Readonly<Record<string, unknown>>, output: string | undefined, width: number): string[] {
-	const lines = JSON.stringify(args, null, 2)
+// A python cell shows its code where other calls show their arguments, and the calls it made after its output.
+function expandedCell(cell: ToolCell, width: number, now: number, frame: number): string[] {
+	const { args, output } = cell;
+	const source = cell.name === "python" && typeof args.code === "string" ? args.code : JSON.stringify(args, null, 2);
+	const lines = source
 		.split("\n")
 		.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width - 4)))
 		.map((line) => `  ${theme.dim("│")} ${theme.muted(line)}`);
@@ -103,6 +106,10 @@ function expandedCell(args: Readonly<Record<string, unknown>>, output: string | 
 		const shown = tail.slice(-OUTPUT_TAIL_LINES);
 		if (tail.length > shown.length) lines.push(`  ${theme.dim(`┆ … ${tail.length - shown.length} earlier lines`)}`);
 		for (const line of shown) lines.push(`  ${theme.dim("┆")} ${truncateToWidth(line, Math.max(1, width - 4), "…")}`);
+	}
+	for (const nested of cell.nested ?? []) {
+		const summary = toolSummary(nested, Math.max(1, width - 4), now, frame);
+		lines.push(`  ${theme.dim("↳")} ${TONES[summary.tone](summary.marker)} ${theme.muted(summary.text)}`);
 	}
 	return lines;
 }

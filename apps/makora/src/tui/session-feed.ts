@@ -14,6 +14,7 @@ import {
 	type TranscriptItem,
 	type UsageState,
 } from "@earendil-works/pi-durable";
+import type { KernelStatus } from "../kernel/manager.ts";
 import type { MakoraSession } from "../session.ts";
 import { type TranscriptRow, transcriptRows } from "../transcript-rows.ts";
 
@@ -45,6 +46,8 @@ export interface FeedState {
 	/** Tokens of the newest request's context, from its usage. */
 	readonly contextTokens: number | undefined;
 	readonly graph: TaskGraph;
+	/** The root conversation's Python kernel, for the dock. */
+	readonly kernel: KernelStatus;
 }
 
 const EMPTY_GRAPH: TaskGraph = { tasks: {} };
@@ -70,6 +73,7 @@ export class SessionFeed {
 	#localCounter = 0;
 	#state: FeedState | undefined;
 	readonly #unsubscribeNotices: () => void;
+	readonly #unsubscribeKernels: () => void;
 
 	constructor(session: MakoraSession) {
 		this.session = session;
@@ -79,6 +83,7 @@ export class SessionFeed {
 		);
 		for (const notice of session.notices) this.#addLocal("notice", notice.message);
 		this.#unsubscribeNotices = session.onNotice((notice) => this.addLocal("notice", notice.message));
+		this.#unsubscribeKernels = session.kernels.onChange(() => this.#changed());
 	}
 
 	/** Start watching; resolves once the first values are in. */
@@ -107,6 +112,7 @@ export class SessionFeed {
 		this.#stopped = true;
 		clearTimeout(this.#derivedTimer);
 		this.#unsubscribeNotices();
+		this.#unsubscribeKernels();
 		await Promise.all([this.#rootWatch?.stop(), this.#graphWatch?.stop()]);
 	}
 
@@ -223,6 +229,7 @@ export class SessionFeed {
 			waiting: parked.length,
 			contextTokens: this.#contextTokens(),
 			graph: this.#graph,
+			kernel: this.session.kernels.status(this.session.root.id),
 		};
 	}
 

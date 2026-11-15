@@ -4,7 +4,7 @@ import { openApp } from "./app.ts";
 import { parseCli, type SessionChoice, USAGE } from "./cli-args.ts";
 import { homePaths, makoraHome, tildify } from "./paths.ts";
 import { runPrint } from "./print.ts";
-import { type MakoraSession, openSession } from "./session.ts";
+import { type MakoraSession, openEphemeralSession, openSession } from "./session.ts";
 import {
 	createSession,
 	latestSession,
@@ -34,17 +34,26 @@ async function main(): Promise<number> {
 	const app = openApp(makoraHome(), command.fake);
 	const cwd = process.cwd();
 	if (command.prompt === undefined) {
-		return runTui(app, { cwd, session: command.session, ...(command.model ? { model: command.model } : {}) });
-	}
-	const meta = chooseForPrint(app.paths.sessions, cwd, command.session);
-	if (typeof meta === "string") {
-		process.stderr.write(`makora: ${meta}\n`);
-		return 1;
+		return runTui(app, {
+			cwd,
+			session: command.session,
+			ephemeral: command.ephemeral,
+			...(command.model ? { model: command.model } : {}),
+		});
 	}
 	const context = BACKGROUND_CONTEXT;
+	const options = command.model ? { model: command.model } : {};
 	let session: MakoraSession;
 	try {
-		session = await openSession(app, meta, command.model ? { model: command.model } : {}, context);
+		if (command.ephemeral) session = await openEphemeralSession(app, cwd, options, context);
+		else {
+			const meta = chooseForPrint(app.paths.sessions, cwd, command.session);
+			if (typeof meta === "string") {
+				process.stderr.write(`makora: ${meta}\n`);
+				return 1;
+			}
+			session = await openSession(app, meta, options, context);
+		}
 	} catch (error) {
 		if (!(error instanceof SessionLockedError)) throw error;
 		process.stderr.write(`makora: ${error.message}\n`);

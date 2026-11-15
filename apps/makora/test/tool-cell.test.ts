@@ -58,6 +58,18 @@ describe("tool summary line", () => {
 		assert.match(line({ callId: "c", name: "bash", args: long, status: states[2]! }, 40), / · 2m05s$/);
 	});
 
+	it("shows a python call's cell number and first code line", () => {
+		const cell: ToolCell = {
+			callId: "p",
+			name: "python",
+			args: { code: "\n  x = 41\nprint(x)" },
+			status: { kind: "done", isError: false, durationMs: 2_034 },
+			cell: 3,
+		};
+		assert.equal(line(cell), "✓ python · cell 3 · x = 41 · 2.0s");
+		assert.equal(line({ ...cell, cell: undefined, status: { kind: "pending" } }), "◌ python · x = 41");
+	});
+
 	it("formats durations in seconds below a minute and minutes above", () => {
 		assert.deepEqual(
 			[formatDuration(400), formatDuration(12_000), formatDuration(185_000)],

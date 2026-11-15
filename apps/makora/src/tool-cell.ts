@@ -18,6 +18,17 @@ export interface ToolCell {
 	readonly status: ToolCellStatus;
 	/** Running output while it runs, the result text once done. */
 	readonly output?: string;
+	/** A `python` call's cell number, once its kernel took it. */
+	readonly cell?: number;
+	/** Calls the tool made to other tools (a cell's `await bash(...)`), in order. */
+	readonly nested?: readonly NestedCell[];
+}
+
+/** A call one tool made to another. */
+export interface NestedCell {
+	readonly name: string;
+	readonly args: Readonly<Record<string, unknown>>;
+	readonly status: ToolCellStatus;
 }
 
 /** How a summary's marker is colored. */
@@ -34,16 +45,24 @@ export interface ToolSummary {
 export const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
 /**
- * The summary line `<marker> <tool> · <argument preview> · <duration>` fitted to `width` columns. The argument
- * preview is truncated first, so the line stays one row whatever state the call is in.
+ * The summary line `<marker> <tool> · <argument preview> · <duration>` fitted to `width` columns, with `cell N` after
+ * the tool for a python cell. The argument preview is truncated first, so the line stays one row whatever state the
+ * call is in.
  */
-export function toolSummary(cell: ToolCell, width: number, now: number, frame = 0): ToolSummary {
+export function toolSummary(
+	cell: Pick<ToolCell, "name" | "args" | "status" | "cell">,
+	width: number,
+	now: number,
+	frame = 0,
+): ToolSummary {
 	const { marker, tone } = markerOf(cell.status, frame);
 	const duration = durationOf(cell.status, now);
 	const preview = argumentPreview(cell.name, cell.args);
-	const fixed = [cell.name, ...(duration === undefined ? [] : [duration])];
+	const head = cell.cell === undefined ? [cell.name] : [cell.name, `cell ${cell.cell}`];
+	const fixed = [...head, ...(duration === undefined ? [] : [duration])];
 	const room = width - visibleWidth(marker) - 1 - visibleWidth(fixed.join(" · ")) - (preview ? 3 : 0);
-	const parts = preview && room >= 2 ? [cell.name, truncateToWidth(preview, room, "…"), ...fixed.slice(1)] : fixed;
+	const parts =
+		preview && room >= 2 ? [...head, truncateToWidth(preview, room, "…"), ...fixed.slice(head.length)] : fixed;
 	return {
 		marker,
 		tone,
@@ -51,15 +70,30 @@ export function toolSummary(cell: ToolCell, width: number, now: number, frame = 
 	};
 }
 
-/** A one-line preview of a call's arguments: the command, the path, or compact JSON. */
+/** A one-line preview of a call's arguments: the command, the path, a cell's first line, or compact JSON. */
 export function argumentPreview(name: string, args: Readonly<Record<string, unknown>>): string {
 	const key = PREVIEW_KEYS[name];
 	const value = key === undefined ? undefined : args[key];
+	if (name === "python" && typeof value === "string") {
+		return (
+			value
+				.split("\n")
+				.find((line) => line.trim() !== "")
+				?.trim() ?? ""
+		);
+	}
 	const text = typeof value === "string" ? value : Object.keys(args).length === 0 ? "" : JSON.stringify(args);
 	return text.replace(/\s*\n\s*/g, " ⏎ ").trim();
 }
 
-const PREVIEW_KEYS: Readonly<Record<string, string>> = { bash: "command", read: "path", write: "path", edit: "path" };
+const PREVIEW_KEYS: Readonly<Record<string, string>> = {
+	bash: "command",
+	read: "path",
+	write: "path",
+	edit: "path",
+	python: "code",
+	llm: "prompt",
+};
 
 /** A duration as `0.4s`, `12.0s`, or `3m05s`. */
 export function formatDuration(ms: number): string {
