@@ -14,8 +14,12 @@ Tab and Shift+Tab cycle through them.
 | vs `<base>` | Everything since the branch left its base, uncommitted changes to tracked files included: the working tree against the merge base with `main`, else `master`, else the remote's default branch (`origin/HEAD`). Hidden when there is no base or the checked-out branch is the base |
 | History | The newest 300 commits of the branch, one row each: short sha, subject, author, age, `+N −M`. Select one to see its diff. Merge commits show their changes against the first parent |
 
-Outside a git repository the view says so; Esc closes it. A "This session" tab (what the session changed) and one tab
-per subagent are planned ([roadmap.md](../roadmap.md)).
+Opened with `d` from the agents dashboard, the view shows the selected agent's worktree with one more tab, `vs base
+<commit>` (for a fork, `vs fork point <commit>`): the working tree and its untracked files against the commit the
+subagent started at, or the fork's starting commit. It starts on that tab, and Esc returns to the dashboard ([subagents.md](subagents.md#the-dashboard)).
+
+Outside a git repository the view says so; Esc closes it. A "This session" tab (what the session changed) is planned
+([roadmap.md](../roadmap.md)).
 
 ## Layouts
 

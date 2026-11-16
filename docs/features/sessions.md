@@ -97,13 +97,16 @@ What the fork starts with:
   changes are not included).`
 - Outside a git repository, the fork shares the folder with the original and says so.
 
-Forks are labeled `fork 1`, `fork 2`, … in the top bar (`makora · fork 2 · …`) and the agents view. Ctrl+A lists the
-main conversation and its forks; Enter makes one active, `x` removes a fork (its worktree, after a warning when it has
+Forks are labeled `fork 1`, `fork 2`, … in the top bar (`makora · viewing fork 2 · fork · @<commit> · esc back to
+main · …`) and the agents dashboard. Ctrl+A lists the main conversation, its forks and its subagents; Enter makes one
+active, Esc on it returns to the main conversation, and `x` removes a fork (its worktree, after a warning when it has
 uncommitted changes, and its kernel; the transcript stays in the session). Forks are saved in `session.sqlite`, so
-they survive restarts: `--continue` and `/resume` open the main conversation, and the agents view reaches the forks.
+they survive restarts: `--continue` and `/resume` open the main conversation, and the agents dashboard reaches the
+forks.
 
-Merging a fork's files back is not built; use git in its worktree (`git diff HEAD`, commit, cherry-pick). Subagents
-will bring `merge` in phase 3. Internals: [architecture/forks.md](../architecture/forks.md).
+Merging a fork's files back is not built; use git in its worktree (`git diff HEAD`, commit, cherry-pick). `merge`
+takes write subagents' branches ([subagents.md](subagents.md)). Internals:
+[architecture/forks.md](../architecture/forks.md).
 
 ## Limits
 

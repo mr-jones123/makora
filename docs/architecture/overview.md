@@ -13,6 +13,8 @@ flowchart TB
     SESSION --> H[Durable Harness]
     H --> REPL[makora-repl extension: python, llm]
     H --> EXT[makora extension: prompt sections]
+    H --> AG[makora-agents extension: spawn, send, merge, wait_agents, anchors]
+    AG --> WTS[worktrees.ts]
     H --> MODELS[pi-ai Models]
     REPL --> TOOLS[CodingTools: read, write, edit, bash]
     REPL --> KM[kernel/manager.ts]
@@ -25,6 +27,7 @@ flowchart TB
   AUTH --> AJ[(auth.json)]
   TOOLS --> FS[project files, shell]
   GIT --> REPO[project git repository]
+  WTS --> WT[(subagent and fork worktrees)]
   MODELS --> API[model providers]
 ```
 
@@ -43,9 +46,11 @@ patterns from p2 (the source resolver, the keybinding declaration merge).
 ## Process model
 
 One process per `makora` run. The TUI and the Durable harness share it. Tools run as child processes through Durable's
-`NodeExecutionEnv` in the session's directory. Each conversation that runs a cell has one Python kernel subprocess in
-its own process group, talking NDJSON over its stdin and stdout ([repl.md](repl.md)). The diff view runs `git` as child
-processes. Phase 4 moves sessions into worker processes behind a background service.
+`NodeExecutionEnv` in the conversation's directory. Each conversation that runs a cell has one Python kernel subprocess
+in its own process group, talking NDJSON over its stdin and stdout ([repl.md](repl.md)). Subagents are conversations of
+the same session in the same process, each with its own kernel in its own worktree ([subagents.md](subagents.md)).
+The diff view and the worktree code run `git` as child processes. Phase 4 moves sessions into worker processes behind
+a background service.
 
 ## Module map
 
@@ -59,9 +64,12 @@ processes. Phase 4 moves sessions into worker processes behind a background serv
 | `sessions.ts` | Session directories, `meta.json`, the session list, the writer lock |
 | `session.ts` | One open session, stored or ephemeral: lock, kernels, `Harness.open`, root conversation, resume, restore notices |
 | `fork.ts` | Forks: the `makora.fork` document, fork points, creating a fork with its worktree, listing and removing forks; see [forks.md](forks.md) |
-| `settings.ts` | `settings.json`, read live (model, thinking level, `snapshots`); the harness run policy |
+| `worktrees.ts` | The git worktrees forks and subagents share: the repository's directory name, the path, adding and removing |
+| `agents/` | Subagents: `types.ts` (the record contract), `docs.ts` (documents and signals), `spawn.ts`, `anchor.ts` (the task that drives one child), `worktree.ts` (placement, setup command, committing a write child's work), `control.ts` (merge, stop, remove), `wait.ts` (`wait_agents`, `collect`), `messaging.ts` (`send`), `family.ts` (identity, family, admitting an input), `read.ts` (`agents.*`), `prompts.ts` (the brief, `<agent_result>`, `<agent_message>`), `budget.ts` (the cost stop), `extension.ts` (the `makora-agents` extension); see [subagents.md](subagents.md) |
+| `usage.ts` | A conversation's or session's total cost from `pi.usage` |
+| `settings.ts` | `settings.json`, read live (model, thinking level, `snapshots`, subagent worktree roots, `agents.maxRunning`); the harness run policy |
 | `models.ts` | Built-in providers plus the scripted fake provider and its `FAKE_SCRIPTS` |
-| `extension.ts` | The `makora` Durable extension: the REPL preamble, cwd, context files, skills |
+| `extension.ts` | The `makora` Durable extension: the REPL and subagents preamble, cwd, context files, skills |
 | `kernel/` | `python-env.ts` (the shared venv), `protocol.ts` (the kernel wire protocol), `kernel.ts` (one kernel process), `manager.ts` (kernels per conversation, status, pid files); see [repl.md](repl.md) |
 | `repl/` | `python-tool.ts`, `llm-tool.ts`, `history.ts`, `git-tree.ts`, `details.ts`, `extension.ts` (the `makora-repl` extension); see [repl.md](repl.md) |
 | `git/` | `repo.ts` (runs git), `diff.ts` (the diff parser), `log.ts` (the log parser) for the diff view; see [tui.md](tui.md#the-diff-view) |
@@ -71,11 +79,12 @@ processes. Phase 4 moves sessions into worker processes behind a background serv
 | `tool-cell.ts`, `transcript-rows.ts` | Entries and live state turned into rows and one-line tool summaries, with a python cell's number and nested calls |
 | `print.ts` | Print mode |
 | `auth/` | `types.ts` (contract), `store.ts`, `login.ts`, `usage.ts` |
-| `tui/` | See [tui.md](tui.md); the diff view is `tui/diff-*.ts` |
+| `tui/` | See [tui.md](tui.md); the diff view is `tui/diff-*.ts`, the agents dashboard `tui/agents.ts`, `tui/dashboard.ts` and `tui/agent-actions.ts` |
 | `source.ts`, `source-resolver.ts` | Resolve `@earendil-works/*` imports to package sources so nothing needs building |
 
 Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` (the kernel's Python package:
-`kernel.py`, `snapshot.py`, `helpers.py`, `protocol.py`), `scripts/sync-skills.mjs`, `skills/` (generated),
+`kernel.py`, `snapshot.py`, `helpers.py`, `protocol.py`), `scripts/sync-skills.mjs`, `scripts/tmux-agents.sh` and
+`scripts/tmux-dashboard.sh` (tmux checks of subagents and the dashboard), `skills/` (generated),
 `skills-src/` (overlays), `skills.lock.json`, `test/`.
 
 ## Files on disk
@@ -83,7 +92,7 @@ Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` 
 ```text
 ~/.makora/                      (MAKORA_HOME)
   auth.json                     accounts and credentials, mode 0600
-  settings.json                 default model, thinking level, snapshots
+  settings.json                 default model, thinking level, snapshots, subagent worktree roots and limit
   keybindings.json              optional key overrides
   AGENTS.md                     optional user-wide instructions
   skills/                       optional user skills
@@ -94,10 +103,13 @@ Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` 
     lock.sqlite, lock.pid       writer lock
     blobs/sha256/…              pickled REPL variables, one file per blob
     kernels/<conversation>.pid  pid of each running kernel
-  worktrees/<repo>-<hash>/<session>/<conversation>/   a fork's git worktree (forks.md)
+  worktrees/<repo>-<hash>/<session>/<conversation>/   a fork's or a write subagent's git worktree
+<temp folder>/makora-worktrees/<repo>-<hash>/<session>/<conversation>/   a review subagent's checkout
 <project>/.git/
   refs/makora/<session>/<conversation>   commits of the worktree's tree after each cell
   refs/makora/<session>/forks/<conversation>   keeps a fork's starting commit alive
+  refs/heads/makora/<name>-<session tail>-<conversation>   a write subagent's branch
+<project>/.makora/settings.json   optional `worktreeSetup` command for new subagent worktrees, run once approved
 ```
 
 An `--ephemeral` session writes none of `sessions/<id>/` and no refs; it still uses `python/venv/`, and a fork it makes

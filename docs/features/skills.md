@@ -19,9 +19,14 @@ Most pstack skills are user-invoked only (`disable-model-invocation: true`); 7 o
 
 pstack was written for Cursor. Each pstack skill that uses a Cursor term starts with a line pointing to
 `makora-adapter`, which maps those terms to what makora has today: the `python` tool and its helpers (`await
-read(...)`, `write`, `edit`, `bash`, with `rg` through `bash` for searching); questions asked in plain text; no
-subagents yet, so subagent steps run inline or are skipped with a `Skipped in Makora:` line. When makora gains
-`spawn()`, the adapter changes in the same PR.
+read(...)`, `write`, `edit`, `bash`, with `rg` through `bash` for searching); questions asked in plain text; and
+subagents. A `Task` becomes `await spawn(name, brief, mode=...)` in a cell: a seat that writes code is a `write` child,
+and a read-only, review or verification seat is a `review` child. A cloud agent becomes a `write` child on its own
+branch, `run_in_background` becomes spawning and then `wait_agents`, and `resume` becomes `await send(name, text)`.
+Makora has no model roles: every seat runs on the session model unless the step passes `model=` to `spawn`, and seats
+on one model are not reported as multi-model evidence. Steps that need something makora lacks are skipped with a
+`Skipped in Makora:` line. The adapter changes in the same PR as the makora API it maps to
+([subagents.md](subagents.md)).
 
 The `no-mistakes` binary is not bundled; install it separately ([getting-started.md](../getting-started.md)).
 

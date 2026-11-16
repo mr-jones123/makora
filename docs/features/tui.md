@@ -1,7 +1,7 @@
 # The TUI
 
-Makora's terminal UI is one column ("layout A") plus two full-screen views: the agents view and the diff view. It runs
-on pi-tui's alternate screen with mouse support. Internals: [architecture/tui.md](../architecture/tui.md).
+Makora's terminal UI is one column ("layout A") plus two full-screen views: the agents dashboard and the diff view. It
+runs on pi-tui's alternate screen with mouse support. Internals: [architecture/tui.md](../architecture/tui.md).
 
 ## The main screen
 
@@ -9,12 +9,12 @@ Top to bottom:
 
 | Row | Shows |
 | --- | --- |
-| Top bar | `makora` · the active fork's label (`fork 2`), when a fork is active · session title (the first prompt) · the active conversation's directory; right: session cost and time since the session started |
-| Transcript | Your messages (`›`), the model's answers as markdown, thinking as one muted line (`∴ thinking · …`), tool calls, notices |
-| Activity row | `◆ N running` (green when above 0) · `◌ N waiting` · `N worktrees` (the session's fork worktrees) · the active conversation's Python kernel, once a cell started one (`py running 3 vars @ cell 7 45 MB`, `py dead (exit 1)` as a warning; see [repl.md](repl.md#cells-in-the-tui)) · compaction state |
+| Top bar | `makora` · on a fork or subagent, `viewing <name> · <mode> · <branch> · esc back to main` · session title (the first prompt) · the active conversation's directory; right: session cost and time since the session started |
+| Transcript | Your messages (`›`), the model's answers as markdown, thinking as one muted line (`∴ thinking · …`), tool calls, subagent results and messages (`↩`), notices |
+| Activity row | `◆ N running` (green when above 0) · `◌ N waiting` · `N worktrees` (the session's fork and subagent worktrees, removed ones not counted) · the active conversation's Python kernel, once a cell started one (`py running 3 vars @ cell 7 45 MB`, `py dead (exit 1)` as a warning; see [repl.md](repl.md#cells-in-the-tui)) · compaction state |
 | Status row | the active conversation's model · thinking level · directory (git branch, or a short commit in a fork's worktree) · a 20-cell context gauge with `NN% of <window>`; right: the account label |
 | Editor | A rounded box; `/` opens command autocomplete |
-| Hint row | The main keys, read from the key bindings so remaps show; shows `press ctrl+c again to exit` after a first Ctrl+C |
+| Hint row | The main keys, read from the key bindings so remaps show (`esc back to main` instead of `esc interrupt` on a fork or subagent); shows `press ctrl+c again to exit` after a first Ctrl+C |
 
 ### Tool calls
 
@@ -28,6 +28,12 @@ made, such as `↳ ✓ bash · echo hello; sleep 2 · 2.1s` ([repl.md](repl.md#c
 
 Run failures, retries, aborts, compaction problems and session restores show as a warning box (`⚠ …`). Command output
 (for example `/accounts`) shows as a muted `·` line; those lines are not saved in the session.
+
+### Subagent results and messages
+
+A subagent's result and a message from another agent show as a `↩` row: a title line (`↩ writer · done`, `↩ message
+from reviewer-b (sibling)`) and the first 6 lines of the text, with `… N more lines` after them. Ctrl+O shows all of it
+([subagents.md](subagents.md#results)).
 
 ### Scrolling
 
@@ -48,41 +54,48 @@ While the transcript is empty, the splash replaces it, centered:
 
 The first message replaces the splash.
 
-## The agents view
+## The agents dashboard
 
-Ctrl+A opens it; Esc returns.
+Ctrl+A opens it; Esc returns. It lists every agent of the session: `main` (the root), its forks by label (`fork 1`),
+and the subagents by name, each indented under the agent it belongs to.
 
-- Title: `Agents · N running · M done`, total cost, requests, elapsed time.
-- Left: every conversation of the session in sections RUNNING, IDLE, DONE: `main` (the root), its forks by label
-  (`fork 1`) indented under the conversation they came from, and, in phase 3, subagents under their owner. Each row has
-  model, directory or worktree, cost and age. Removed forks are not listed.
-- Right: the selected agent's model, directory, for a fork where its files come from (`worktree at the fork point's
-  snapshot (82927d5)`, `worktree at HEAD (…)`, `shares the original's folder`), cost and turns, and its recent tool
-  calls.
-- Keys: ↑/↓ select; Enter makes the selected conversation the active one and returns to the main screen, where what
-  you type goes to it; `x` removes the selected fork after a confirmation, which warns when its worktree has
-  uncommitted changes (the main conversation cannot be removed); Esc back. The outcome of `x` shows in the hint row.
+- Title: `Agents · N running · M waiting on you · K done`; right: total cost, requests, elapsed time.
+- Left: sections RUNNING (running and queued subagents; `main` and forks while they have a run), WAITING ON YOU
+  (finished write subagents not merged yet) and DONE (finished reviews, merged and stopped subagents; `main` and forks
+  when idle). Each row has a state glyph, name, mode, branch or `@<short commit>`, model, a 5-cell budget bar, cost,
+  time worked and the cell running now. Removed subagents and forks are not listed.
+- Right: the selected agent's inspector: where it started, its task, its kernel, cost, time and turns against its
+  budget, its last 3 cells, its last messages, its worktree's changes and path, and its result or why it stopped. A
+  fork shows where its files come from (`worktree at the fork point's snapshot (82927d5)`, `worktree at HEAD (…)`,
+  `shares the original's folder`).
+- Below 100 columns the inspector goes under the list.
+- Keys: ↑/↓ select; Enter opens the selected agent in the main screen, where what you type goes to it; `d` diff, `m`
+  merge, `s` stop, `x` remove, each after a confirmation where it changes something; Esc back. The outcome of an action
+  shows in the hint row.
 
-Forks: [sessions.md](sessions.md#forks).
+On a fork, `x` removes the fork after a confirmation that warns when its worktree has uncommitted changes, and `d`
+opens its diff against the fork point. The main conversation cannot be removed, merged or stopped from here.
 
-In phase 3 this becomes the subagents dashboard (layout A): sections RUNNING, WAITING ON YOU, DONE; rows with mode,
-branch or ref, budget bar and current cell; an inspector with kernel state, budgets, recent cells and the worktree
-diff stat; keys `d` diff, `m` merge, `s` stop, `x` remove; Enter opens the agent in the main screen, where what you
-type goes to it. Design: [architecture/subagents.md](../architecture/subagents.md#the-dashboard).
+Details of every column and key: [subagents.md](subagents.md#the-dashboard). Forks:
+[sessions.md](sessions.md#forks).
 
 ## Keys
 
 | Key | Action | Binding id |
 | --- | --- | --- |
 | Esc | Stop the running work | `app.interrupt` |
+| Esc (on a fork or subagent) | Back to the main conversation; checked before `app.interrupt` | `app.back` |
 | Ctrl+C | Stop the run; else clear the editor; else press twice within 1.5 s to exit | `app.cancel` |
 | Ctrl+D | Exit when the editor is empty | `app.exit` |
 | Ctrl+O | Expand or collapse tool calls | `app.tools.expand` |
-| Ctrl+A | Agents view | `app.agents` |
+| Ctrl+A | Agents dashboard | `app.agents` |
 | Ctrl+L | Model picker | `app.model.select` |
 | Ctrl+G | Diff view ([diff.md](diff.md)) | `app.diff` |
-| x (agents view) | Remove the selected fork | `app.agents.remove` |
-| Home | Start of the editor line (Ctrl+A is taken by the agents view) | pi-tui editor |
+| d (dashboard) | Diff of the selected agent's work against its base commit | `app.agents.diff` |
+| m (dashboard) | Merge the selected write subagent | `app.agents.merge` |
+| s (dashboard) | Stop the selected running or queued subagent | `app.agents.stop` |
+| x (dashboard) | Remove the selected subagent with its children, or the selected fork | `app.agents.remove` |
+| Home | Start of the editor line (Ctrl+A is taken by the agents dashboard) | pi-tui editor |
 | PgUp / PgDn, Ctrl+Home / Ctrl+End | Scroll the transcript | pi-tui |
 
 Every binding can be remapped in `~/.makora/keybindings.json` ([reference/configuration.md](../reference/configuration.md)).

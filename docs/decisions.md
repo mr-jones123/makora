@@ -102,3 +102,53 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   folder would restore the fork point's variables next to the original's later files, and the two conversations would
   overwrite each other's files. The fork reuses the worktree layout planned for subagents; merging back waits for
   phase 3's `merge`. See [architecture/forks.md](architecture/forks.md).
+- **Review worktrees in the temp folder, write worktrees under `~/.makora/worktrees`, both configurable (owner,
+  2026-11-16).** A review checkout is thrown away anyway, so losing it on a reboot costs nothing; a write agent's
+  unmerged work has to survive one. Subagents serve both tasks (`write`) and code review (`review`).
+- **A write subagent's branch is `makora/<name>-<last 6 of the session id>-<conversation id>` (2026-11-16).** The
+  planned `makora/<session>/<name>` was replaced because names repeat across a session's parents and conversation ids
+  repeat across sessions; both parts together are unique in a repository.
+- **A child's result reaches a parent that is itself a child the way a message does (2026-11-16).** While that parent
+  runs, the result is a steer of its run, so the parent's anchor still watches the run. A finished parent is woken by
+  it. The root gets results as follow-up inputs.
+- **Messages a child cannot take are refused, not queued (2026-11-16).** A message to a queued or removed child, or one
+  that arrives between the end of a child's run and its anchor recording it, fails with an error the sender reads,
+  and the sender can send again.
+- **A run woken by a message or by user input takes no running slot and has no time limit (2026-11-16, open for the
+  owner).** Its turn limit applies.
+- **The record types are type aliases (2026-11-16).** Durable's documents take JSON types, which interfaces do not
+  satisfy; the shapes are unchanged. Added to the contract: `AgentWorktree.repository` (where git runs for the
+  worktree), the sender's and receiver's conversation ids on `AgentMessage`, `AgentsDocument`, `AgentMessageLog`, and
+  a `{ mode: "shared" }` result for children outside git.
+- **Text typed into an opened subagent goes through its anchor (2026-11-16).** `MakoraSession.submit` admits it the
+  way `send` admits a message: a steer while the child runs, a wake-up under the anchor's next round once it finished,
+  refused while queued or removed. A plain submission started a run no anchor watched, so the record kept its old
+  state and the parent never heard the new result.
+- **The dashboard puts the main conversation and forks in RUNNING or DONE (2026-11-16).** Its sections are RUNNING,
+  WAITING ON YOU and DONE. A subagent's section follows its record; the root and forks are RUNNING while they have a
+  run, a parked `wait_agents` included, and DONE when idle. Children are indented only under a parent in the same
+  section.
+- **Esc on a fork or subagent returns to the main conversation (2026-11-16).** The banner promises `esc back to main`,
+  so the key does that (`app.back`, checked before `app.interrupt`); Ctrl+C still stops the opened agent's run. Before,
+  Esc on a fork stopped the fork's run.
+- **The dashboard's merge, stop and remove are the cell tools' functions (2026-11-16).** `src/agents/control.ts` takes
+  a tool call's API or the host's harness, so a user's merge and the model's merge record the same states and converge
+  the same way after a crash.
+- **A repository's worktree setup command runs only once the user approved it (2026-11-16).** `.makora/settings.json`
+  comes with the repository, so running its `worktreeSetup` unasked lets any clone run code with the user's rights.
+  The user's `settings.json` keeps approvals as the repository path and the command's SHA-256, so a changed command asks
+  again. The TUI asks once in a dialog; print mode skips an unapproved command and the notices say how to approve it.
+  The command runs without provider credentials and is killed after `agents.setupTimeoutMinutes` (default 10) or on a
+  stop or remove.
+- **makora commits a child's work without the repository's hooks or signing (2026-11-16).** Those are the user's rules
+  for their own commits. A failing lint hook or a GPG passphrase prompt with no terminal would otherwise fail the
+  anchor, which keeps its running slot and leaves waits on the child parked for good. The user's hooks still run when
+  `merge` brings the branch into their tree.
+- **A stopped write child's work is committed to its branch (2026-11-16).** Removing it then deletes only the worktree
+  folder and the files git ignores there, and the confirmation says so.
+- **A child stopped by its budget stays stopped (2026-11-16).** A child stopped for cost, or at its `usd`, refuses
+  every wake, because the spend check runs only after a tool round and each wake spends at least one more request. A
+  child stopped for turns or time wakes only for its parent or the user, who decide that it may go on.
+- **`merge` refuses while the user has a merge, cherry-pick, revert or rebase in progress (2026-11-16).** Aborting a
+  conflict that was not makora's threw away the user's resolution, and a merge into a stopped rebase landed in its
+  middle. A merge that stops without conflicts (a failing hook, failed signing) is aborted and reported as its error.

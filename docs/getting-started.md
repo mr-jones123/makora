@@ -46,7 +46,7 @@ environment, which needs [uv](https://docs.astral.sh/uv/), or `python3` 3.11 or 
 | `makora --ephemeral` | A session kept in memory only: nothing saved, nothing to resume |
 
 In the TUI: Esc stops a run, Ctrl+C stops a run or clears the editor (twice on an empty editor exits), Ctrl+O expands
-tool output, Ctrl+A opens the agents view, Ctrl+G opens the diff view, Ctrl+L picks a model, `/` lists commands. Full
+tool output, Ctrl+A opens the agents dashboard, Ctrl+G opens the diff view, Ctrl+L picks a model, `/` lists commands. Full
 list: [features/tui.md](features/tui.md).
 
 ## Where things live

@@ -1,6 +1,6 @@
 # The Python REPL
 
-The model works through one tool, `python`: a persistent Python REPL that runs in the session's directory. Variables,
+The model works through `python`: a persistent Python REPL that runs in the conversation's directory. Variables,
 functions and imports stay between cells, so the model can load a large file once, keep it in a variable, and print
 only what it needs. File and shell work happens from Python, through helpers that makora records like any other tool
 call. Internals: [architecture/repl.md](../architecture/repl.md).
@@ -26,6 +26,7 @@ Every cell starts with these names defined. The async ones need `await`; top-lev
 | `await llm(prompt, schema=None, model=None, timeout=300)` | One model call without tools, with the conversation's model unless `model` (`"provider/modelId"`) says otherwise. Returns the text. With `schema` (a JSON Schema, or a pydantic model class), returns the parsed JSON value after checking it against the schema |
 | `ctx.input()` | The latest user message's text |
 | `await ctx.transcript(limit=20)` | The newest `limit` transcript messages, oldest first, as dicts with `id`, `kind`, `role` and `text`. Tool results add `toolName` and `isError`, and assistant messages add `toolCalls` |
+| `await spawn(...)`, `collect`, `send`, `merge`, `stop`, `remove`, `agents.list()`, `agents.get(name)`, `agents.recent(name)` | Subagents: see [subagents.md](subagents.md#start-one-from-a-cell) |
 
 A failed call raises `HostError`. A `bash` command that exits with a non-zero code does not raise: check
 `.exit_code`.
@@ -122,5 +123,5 @@ variable is pickled again to check it.
 
 ## Not yet
 
-Subagents (`spawn`, `wait_agents`) come in phase 3 ([roadmap.md](../roadmap.md)). Old blobs are never pruned yet.
+Old blobs are never pruned yet.
 A fork (`/fork`) restores the variables and files of its fork point ([sessions.md](sessions.md#forks)).

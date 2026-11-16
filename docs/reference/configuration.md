@@ -13,13 +13,13 @@
 
 | File | Written by | Format |
 | --- | --- | --- |
-| `settings.json` | `/model`, `/thinking`, or you | `{ "model": { "provider": "anthropic", "modelId": "…" }, "thinkingLevel": "high", "snapshots": true }` |
+| `settings.json` | `/model`, `/thinking`, or you | `{ "model": { "provider": "anthropic", "modelId": "…" }, "thinkingLevel": "high", "snapshots": true, "worktrees": { "review": "…", "write": "…" }, "agents": { "maxRunning": 4, "setupTimeoutMinutes": 10, "approvedSetups": [{ "repository": "…", "sha256": "…" }] } }` |
 | `keybindings.json` | You | `{ "<binding id>": "<key>" or ["<key>", …] }` |
 | `auth.json` | `/login`, `/accounts`, `/logout`, token refresh | See [architecture/auth.md](../architecture/auth.md); mode 0600, do not edit while makora runs |
 | `AGENTS.md` | You | Markdown instructions added to every conversation's prompt, before project AGENTS.md files |
 | `skills/<name>/SKILL.md` | You | User skills; see [features/skills.md](../features/skills.md) |
 | `sessions/<id>/` | makora | See [features/sessions.md](../features/sessions.md) |
-| `worktrees/<repo>-<hash>/<session>/<conversation>/` | `/fork`, removed by `x` in the agents view | Git worktrees of forks ([architecture/forks.md](../architecture/forks.md#the-worktree)) |
+| `worktrees/<repo>-<hash>/<session>/<conversation>/` | `/fork` and write subagents, removed by `x` in the agents dashboard or `remove(name)` | Git worktrees of forks ([architecture/forks.md](../architecture/forks.md#the-worktree)) and of write subagents unless `worktrees.write` moves them ([features/subagents.md](../features/subagents.md#where-worktrees-live-and-why)) |
 | `python/venv/` | makora, on the first REPL cell | The Python environment kernels run in; delete it to force a rebuild ([architecture/repl.md](../architecture/repl.md#the-python-environment)) |
 
 ### `settings.json` fields
@@ -29,6 +29,11 @@
 | `model` | none | `{ "provider", "modelId" }` of new sessions |
 | `thinkingLevel` | none | Thinking level of new sessions |
 | `snapshots` | `true` | Save REPL variables and a git tree after each cell, and restore them after a kernel restart. `false` turns both off for stored sessions; read at every cell ([features/repl.md](../features/repl.md#turning-durability-off)) |
+| `worktrees.review` | `<temp folder>/makora-worktrees` | Root of review subagents' checkouts; read at each spawn |
+| `worktrees.write` | `~/.makora/worktrees` | Root of write subagents' worktrees; read at each spawn |
+| `agents.maxRunning` | `4` | Subagents running at once per session; more wait as `queued`. A whole number of at least 1; read when an agent asks for a slot |
+| `agents.setupTimeoutMinutes` | `10` | How long a repository's `worktreeSetup` may run before it is killed and its child stopped; a positive number, read at each run |
+| `agents.approvedSetups` | none | The `worktreeSetup` commands you let run, as `{ "repository": "<top level>", "sha256": "<hex SHA-256 of the command>" }`. The TUI adds one when you approve a command; a command not listed is skipped ([features/subagents.md](../features/subagents.md#the-setup-command-is-code-from-the-repository)) |
 
 `settings.json` and `keybindings.json` are read live; a missing or unreadable `settings.json` reads as empty, and
 malformed key bindings are skipped.
@@ -40,13 +45,17 @@ Makora's own:
 | Id | Default |
 | --- | --- |
 | `app.interrupt` | `escape` |
+| `app.back` | `escape`; checked before `app.interrupt`, and only on a fork or subagent |
 | `app.cancel` | `ctrl+c` |
 | `app.exit` | `ctrl+d` |
 | `app.tools.expand` | `ctrl+o` |
 | `app.agents` | `ctrl+a` |
 | `app.model.select` | `ctrl+l` |
 | `app.diff` | `ctrl+g` |
-| `app.agents.remove` | `x`; read only in the agents view |
+| `app.agents.diff` | `d`; read only in the agents dashboard |
+| `app.agents.merge` | `m`; read only in the agents dashboard |
+| `app.agents.stop` | `s`; read only in the agents dashboard |
+| `app.agents.remove` | `x`; read only in the agents dashboard |
 
 The diff view's own keys, read only while it is open ([features/diff.md](../features/diff.md)):
 
@@ -83,3 +92,4 @@ pi-tui's ids (editor, selection lists, scrolling) can be overridden the same way
 | `AGENTS.md` in the cwd and each parent up to the git root | Added to the prompt, outermost first |
 | `.makora/skills/` in the cwd | Project skills |
 | `.agents/skills/` in the cwd and each parent up to the git root | Skills installed for any agent |
+| `.makora/settings.json` at the repository's top level | `{ "worktreeSetup": "<shell command>" }`: run with `sh -c` in each new subagent worktree before the child starts, for example `npm ci --ignore-scripts`, once you approved that command for that repository (`agents.approvedSetups`). It runs without provider credentials in its environment; a failing or timed-out command stops the child. This file comes with the repository, so a clone you do not trust can put any command here: read it before you approve ([features/subagents.md](../features/subagents.md#the-setup-command-is-code-from-the-repository)) |

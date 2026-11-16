@@ -34,7 +34,7 @@ captured.
    		| { kind: "snapshot"; path: string; commit: string; tree: string }
    		| { kind: "head"; path: string; commit: string }
    		| { kind: "shared" };
-   	removed?: true; // hidden from the agents view; Durable keeps the transcript
+   	removed?: true; // hidden from the agents dashboard; Durable keeps the transcript
    };
    ```
 
@@ -58,6 +58,9 @@ captured.
 ~/.makora/worktrees/<repo dir name>-<8 hex of sha256(repo path)>/<session id>/<fork conversation id>/
 <repo>/.git/refs/makora/<session id>/forks/<fork conversation id>   keeps a snapshot fork's commit alive
 ```
+
+The git calls that find the repository, build this path, and add or remove a worktree live in `src/worktrees.ts`, which
+subagents use too ([subagents.md](subagents.md#worktrees-and-roots)).
 
 - The root of `~/.makora` follows `MAKORA_HOME`. The repository path is the main worktree's (from `git rev-parse
   --git-common-dir`), so a fork of a fork lands under the same repository directory.
@@ -85,28 +88,30 @@ deleted by hand. When step 3 fails during `/fork`, the fork is marked removed an
 ## Switching
 
 The TUI keeps one `SessionFeed` per conversation shown so far; the active one draws the main screen. Making a
-conversation active (`/fork`, or Enter in the agents view) moves the top bar (`fork N · …`), the status row's folder
+conversation active (`/fork`, or Enter in the agents dashboard) moves the top bar (`viewing fork N · fork · @<commit> ·
+esc back to main`), the status row's folder
 and branch (a short commit for a detached worktree), the dock's kernel, `@` file completion, `/diff`, `/model`,
-`/thinking`, `/compact`, Esc and what you type to that conversation. Session notices go to the active conversation.
-`--continue` and `/resume` open the root.
+`/thinking`, `/compact`, Ctrl+C and what you type to that conversation. Esc makes the root active again. Session
+notices go to the active conversation. `--continue` and `/resume` open the root.
 
 ## Removing
 
-`x` in the agents view on a fork, after a confirmation that warns when `git status --porcelain` in the worktree is not
+`x` in the agents dashboard on a fork, after a confirmation that warns when `git status --porcelain` in the worktree is not
 empty:
 
 1. Abort the fork's work and stop its kernel.
 2. `git worktree remove --force <path>` (or `git worktree prune` when the folder is already gone).
 3. `git update-ref -d refs/makora/<session>/forks/<id>`.
-4. Set `removed: true` in the fork's document. The agents view hides it; Durable keeps its transcript.
+4. Set `removed: true` in the fork's document. The agents dashboard hides it; Durable keeps its transcript.
 
 Each step converges, so removing again after a crash finishes the job. The root cannot be removed. Removing a fork
 whose files are shared removes no folder.
 
 ## Limits
 
-- **Merging a fork back is not built.** Phase 3's `merge` will bring a worktree's work back
-  ([subagents.md](subagents.md)). Until then, use git in the worktree (`git diff HEAD`, commit, cherry-pick).
+- **Merging a fork back is not built.** A fork's worktree is detached, and `merge` takes a write subagent's branch
+  ([subagents.md](subagents.md#merge-stop-and-remove)). Use git in the worktree (`git diff HEAD`, commit,
+  cherry-pick); `d` in the agents dashboard shows the fork's changes since its fork point.
 - **Ephemeral sessions** fork at `HEAD` (they save no snapshots), and their fork worktrees stay on disk after the
   process ends, like any other file a session's tools write. Remove them with `git worktree remove`.
 - **Deleting a session** does not yet remove its fork worktrees and refs.

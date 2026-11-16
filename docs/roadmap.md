@@ -1,7 +1,7 @@
 # Roadmap
 
-The order of work, what each phase delivers, and what is still open. Current scope is phases 1 to 3; later phases are
-revisited once those work. The long-term goal is in [vision.md](vision.md).
+The order of work, what each phase delivers, and what is still open. Current scope is phases 1 to 3, now built; later
+phases are revisited next. The long-term goal is in [vision.md](vision.md).
 
 ## Phase 1: app skeleton (built)
 
@@ -53,15 +53,15 @@ Open items of phase 2:
 | Item | Needs |
 | --- | --- |
 | Blob pruning: every blob stays until its session is deleted | Keep the last N cells, fork points and marked cells; pick N |
-| `ctx.get(name)` handles for files and child results | Child results arrive with phase 3 |
+| `ctx.get(name)` handles for files and child results | A design; `agents.get(name)` returns a child's record today |
 | Cheaper change detection: every variable is pickled again after every cell to hash it | A measurement on real workloads (DataFrames) |
 | Memory limits on the kernel process | A limit and how to report it |
-| Kernel startup cost per subagent (a process plus a restore) | Measure with 4 children in phase 3 |
+| Kernel startup cost per subagent (a process plus a restore) | Measure with 4 children (listed under phase 3) |
 
 ## Forks (built)
 
 `/fork` branches the active conversation before an earlier message, with that point's Python variables and files: a
-Durable fork, plus a git worktree at the fork point's file snapshot under `~/.makora/worktrees/`. The agents view
+Durable fork, plus a git worktree at the fork point's file snapshot under `~/.makora/worktrees/`. The agents dashboard
 lists the main conversation and its forks; Enter makes one active and `x` removes a fork with its worktree
 ([features/sessions.md](features/sessions.md#forks), [architecture/forks.md](architecture/forks.md)). Verified in
 `test/fork.test.ts` (real kernels, temp repository) and in tmux with the fake model.
@@ -70,7 +70,7 @@ Open items of forks:
 
 | Item | Needs |
 | --- | --- |
-| Merging a fork's files back | Phase 3's `merge` |
+| Merging a fork's files back | `merge` takes a write subagent's branch; a fork's worktree is detached and has none |
 | Deleting a session's fork worktrees and refs with the session | Session deletion |
 | An ephemeral session's fork worktrees stay after it ends | A decision: remove them on exit, or keep them as the session's file output |
 
@@ -84,24 +84,49 @@ Open items of the diff view:
 
 | Item | Needs |
 | --- | --- |
-| A "This session" tab and one tab per subagent | The session's cell trees; phase 3 |
+| A "This session" tab | The session's cell trees |
 | Mouse support | Mouse handling in `DiffView` |
 | At 80 columns the hint row is cut off after `r reve…` | A shorter hint set for narrow screens |
 | `diff-state.ts` has no unit tests; the tmux runs cover it | Reducer tests |
 
-## Phase 3: subagents (designed, next)
+## Phase 3: subagents (built)
 
-Every subagent gets its own worktree (`review` or `write` mode) and its own kernel, and is managed from the agents
-dashboard (layout A). Design: [architecture/subagents.md](architecture/subagents.md).
+Delivered in `apps/makora`, verified with the fake model in `test/agents.test.ts`, `test/agents-crash.test.ts` and
+`test/dashboard.test.ts`, and in tmux by `scripts/tmux-agents.sh` and `scripts/tmux-dashboard.sh`
+([features/subagents.md](features/subagents.md), [architecture/subagents.md](architecture/subagents.md)):
 
-Build order, continuing the REPL's steps 1 to 3; each step ends in a check on the real thing before the next starts:
+- `spawn` from a cell: a `review` child in a checkout detached at a ref, or a `write` child on its own branch, each
+  with its own kernel, its own model when given, and a budget in turns, USD and minutes. At most 4 run at once; more
+  queue. A child may spawn children once.
+- `wait_agents` for the model and `collect` in a cell, parked in Durable without holding a process; results reported
+  as `<agent_result>` to a parent that is not waiting.
+- `send` between a parent, siblings and children, with length, inbox and rate limits; a message wakes a finished child.
+- `merge` with `--no-ff`, conflicts returned as paths with the tree left clean, refused during the user's own merge or
+  rebase; `stop`; `remove` with the children and worktrees, keeping an unmerged branch with all its work.
+- Crash safety: a killed session resumes its children without running anything twice, and a deleted review checkout
+  comes back.
+- The project's `worktreeSetup` command in new worktrees, once the user approved it, without provider credentials and
+  with a time limit; review checkouts in the temp folder, write worktrees under `~/.makora/worktrees`, both
+  configurable.
+- The agents dashboard (layout A): sections RUNNING, WAITING ON YOU and DONE, rows with budget bars and the running
+  cell, an inspector, and `d` diff against the base commit, `m` merge, `s` stop, `x` remove, Enter to open an agent and
+  type to it.
+- The preamble and the skills adapter: `Task` maps to `spawn`, read-only seats to `review` children, cloud agents to
+  `write` children.
 
-| # | Step | Done when |
-| --- | --- | --- |
-| 4 | Worktree manager; `spawn`, `send`, `collect`, `wait_agents`, `merge`; budgets; cleanup | Two reviewers and a writer run in parallel; a makora crash keeps the children; merge reports conflicts; remove deletes the worktree |
-| 5 | Dashboard (layout A): inspector, open an agent, message, diff, merge, stop, remove | Each action works in tmux with the fake model |
-| 6 | Prompt and skills: `wait_agents` offered to the model; adapter maps Task to `spawn` (cloud agents to `write` worktrees); pstack model roles as a makora setting | `sync-skills --check` green; `interrogate` and `swarm` run real subagents |
-| 7 | End-to-end scenarios with the fake model; docs updated | "Two reviewers on worktrees, crash midway, resume, merge" passes |
+Open items of phase 3:
+
+| Item | Needs |
+| --- | --- |
+| A run woken by a message or by user input takes no running slot and has no time limit | An owner decision ([decisions.md](decisions.md)) |
+| Re-adding a missing worktree does not rerun the setup command | Rerun it, or record that it ran in the worktree |
+| The cost limit is checked after each tool round, so one long response can pass it | Usage during a generation |
+| pstack model roles as a makora setting | A setting per role, read by the adapter |
+| `interrogate` and `swarm` with real subagents | A run on a real model |
+| Deleting a session's worktrees and branches with the session | Session deletion |
+| The dashboard list does not scroll; agents past the screen's height are cut off | Scrolling in the list |
+| A live view of a running agent inside the dashboard | Key routing to a second scrolling area in pi-tui |
+| Kernel startup cost per subagent | A measurement with 4 children |
 
 ## Later phases (planned)
 

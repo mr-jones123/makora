@@ -3,7 +3,7 @@
 > **Status: built (phase 2), except the items in [Not built yet](#not-built-yet).** The decisions behind it are in
 > [decisions.md](../decisions.md). What a user sees: [features/repl.md](../features/repl.md).
 
-The model's one tool is a persistent Python REPL, following the Recursive Language Model idea: context lives in
+The model's main tool is a persistent Python REPL, following the Recursive Language Model idea: context lives in
 variables, and model calls are functions. Durable keeps the transcript, tasks and tool calls. The REPL's variables
 survive kernel crashes and makora restarts through per-cell snapshots tied to Durable commits.
 
@@ -35,8 +35,8 @@ flowchart TB
 | Result details | `src/repl/details.ts` | The shape of a `python` result's `details` |
 | `makora-repl` extension | `src/repl/extension.ts` | Registers `python` and `llm` |
 
-The model is offered only `python` (`modelTools: [python]` in `src/session.ts`). Opening a session made before the
-REPL reconfigures its root conversation the same way. The registry still installs Durable's `CodingTools`, so `read`,
+The model is offered `python` and the subagents' `wait_agents` (`modelTools: [python, wait_agents]` in
+`src/session.ts`). Opening a session made before them reconfigures its root conversation the same way. The registry still installs Durable's `CodingTools`, so `read`,
 `write`, `edit` and `bash` run when a cell calls them, as nested Durable calls, each recorded in its own task.
 Durable itself is unchanged.
 
@@ -120,6 +120,7 @@ The helpers in a cell send `host_request` messages, and the `python` tool answer
 | `tool` | `api.executeTool(name, args, context, { key: requestId })`: a nested Durable call of `read`, `write`, `edit` or `bash`. Durable checks the arguments against the tool's schema |
 | `llm` | A nested call of the `llm` tool, keyed the same way |
 | `ctx` | `latestInput` or `recentEntries` in `history.ts`, read from the conversation's committed entries |
+| `agents` | One nested call of a subagent tool, keyed the same way: `spawn`, `collect`, `send`, `merge`, `stop` or `remove`, or the `agents` tool for `list`, `get` and `recent` ([subagents.md](subagents.md#tools)). The result is the tool's structured output |
 
 `await read(path)` with neither `offset` nor `limit` returns the whole file. Durable's `read` stops at its line and
 byte limits and says so only in a diagnostic, so the python tool follows the continuation offsets, one nested `read`
@@ -341,11 +342,6 @@ The phase 2 design written before the build differed in these points:
 - **Pruning.** Every blob stays until the session is deleted. The plan keeps full blobs for the last N cells, fork
   points and marked cells, and reports a restore that needs a pruned blob as pruned (the restore side already reports
   a missing blob).
-- **Subagents.** `spawn`, `send`, `collect`, `merge`, `list_agents` and the parked model tool `wait_agents`, each
-  child with its own worktree and kernel. Design: [subagents.md](subagents.md). A spawned child will belong to a
-  background anchor task owned by the conversation, not to the cell: Durable aborts the nested calls of a tool call
-  that is not replay-safe when it restarts, and a cell cannot be replay-safe, so a child owned by the cell would die
-  with it. Calling `spawn` again with the same name reattaches.
 - **Cheaper change detection.** Every variable is re-pickled after every cell to hash it. Candidates are skipping
   variables the cell never names, or fingerprints for known types.
 - **Kernel startup cost per subagent** (a Python process plus a restore), to measure with 4 children.
