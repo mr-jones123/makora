@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DiffFile, DiffLine } from "../src/git/diff.ts";
-import type { QuizContent } from "../src/quiz/bank.ts";
-import { buildPage, FILE_LINE_CAP, type QuizPage, renderPage, shuffleOptions } from "../src/quiz/page.ts";
+import type { Note, QuizContent } from "../src/quiz/bank.ts";
+import { buildPage, FILE_LINE_CAP, NOTE_CONTEXT, type QuizPage, renderPage, shuffleOptions } from "../src/quiz/page.ts";
 
 /** A seeded generator in [0, 1) (mulberry32), so a failing permutation can be replayed. */
 function seeded(seed: number): () => number {
@@ -42,12 +42,14 @@ describe("shuffling a question's options", () => {
 
 const HOSTILE = ["</script><img src=x onerror=alert(1)>", "<!-- <script>", "-->", "</SCRIPT >", "$& $1 & \u2028"];
 
-function content(text = "ordinary"): QuizContent {
+const SHA = "abc1234abc1234abc1234abc1234abc1234abc12";
+
+function content(text = "ordinary", notes: readonly Note[] = []): QuizContent {
 	return {
 		range: "abc1234..HEAD",
 		commits: [
 			{
-				sha: "abc1234abc1234abc1234abc1234abc1234abc12",
+				sha: SHA,
 				subject: `feat: ${text}`,
 				author: "me",
 				date: 0,
@@ -57,6 +59,7 @@ function content(text = "ordinary"): QuizContent {
 			},
 		],
 		decisions: [{ title: text, summary: text }],
+		notes,
 		questions: Array.from({ length: 10 }, (_, index) => ({
 			question: `${text} ${index}?`,
 			options: [`right ${index}`, `wrong a ${index}`, `wrong b ${index}`, `wrong c ${index}`],
@@ -83,7 +86,7 @@ function textFile(path: string, lines: readonly DiffLine[]): DiffFile {
 }
 
 describe("the page's diffs", () => {
-	it("prefixes lines by kind, caps each file and counts the lines left out", () => {
+	it("numbers lines by side, caps each file and counts the rows left out", () => {
 		const long = Array.from(
 			{ length: 400 },
 			(_, index): DiffLine => ({ kind: "add", newNo: index + 1, text: `line ${index}` }),
@@ -94,21 +97,60 @@ describe("the page's diffs", () => {
 			{ kind: "add", newNo: 2, text: "new" },
 		];
 		const binary: DiffFile = { path: "logo.png", status: "A", added: 0, removed: 0, body: { kind: "binary" } };
-		const files = new Map([
-			[content().commits[0]!.sha, [textFile("long.ts", long), textFile("short.ts", short), binary]],
-		]);
+		const files = new Map([[SHA, [textFile("long.ts", long), textFile("short.ts", short), binary]]]);
 		const [longPage, shortPage, binaryPage] = buildPage(content(), {
 			project: "demo",
 			createdAt: 0,
 			files,
 			random: Math.random,
 		}).commits[0]!.files;
-		assert.equal(longPage!.lines.length, FILE_LINE_CAP);
-		assert.equal(longPage!.lines[0], "@@ -1,1 +1,1 @@");
+		assert.equal(longPage!.rows.length, FILE_LINE_CAP);
+		assert.deepEqual(longPage!.rows[0], { kind: "hunk", text: "@@ -1,1 +1,1 @@" });
 		assert.equal(longPage!.more, 401 - FILE_LINE_CAP);
-		assert.deepEqual(shortPage!.lines, ["@@ -1,1 +1,1 @@", " same", "-old", "+new"]);
+		assert.deepEqual(shortPage!.rows, [{ kind: "hunk", text: "@@ -1,1 +1,1 @@" }, ...short]);
 		assert.equal(shortPage!.more, 0);
-		assert.deepEqual([binaryPage!.lines, binaryPage!.note], [[], "binary file"]);
+		assert.deepEqual([binaryPage!.rows, binaryPage!.reason], [[], "binary file"]);
+	});
+
+	it("puts each note on its line, and shows a line the cap would hide with the rows around it", () => {
+		const long = Array.from(
+			{ length: 400 },
+			(_, index): DiffLine => ({ kind: "add", newNo: index + 1, text: `line ${index + 1}` }),
+		);
+		const short: DiffLine[] = [
+			{ kind: "context", oldNo: 1, newNo: 1, text: "same" },
+			{ kind: "del", oldNo: 2, text: "old" },
+			{ kind: "add", newNo: 2, text: "new" },
+		];
+		const note = (path: string, side: "new" | "old", line: number): Note => ({
+			sha: SHA,
+			path,
+			side,
+			line,
+			comment: `${path} ${side} ${line}`,
+			cites: [],
+		});
+		const notes = [note("short.ts", "old", 2), note("long.ts", "new", 350), note("short.ts", "new", 2)];
+		const files = new Map([[SHA, [textFile("long.ts", long), textFile("short.ts", short)]]]);
+		const [longPage, shortPage] = buildPage(content("ordinary", notes), {
+			project: "demo",
+			createdAt: 0,
+			files,
+			random: Math.random,
+		}).commits[0]!.files;
+		assert.deepEqual(
+			shortPage!.notes.map((each) => [each.index, each.comment, shortPage!.rows[each.row]]),
+			[
+				[0, "short.ts old 2", { kind: "del", oldNo: 2, text: "old" }],
+				[2, "short.ts new 2", { kind: "add", newNo: 2, text: "new" }],
+			],
+		);
+		// Rows 0-299 (the hunk header and lines 1-299), a gap, then lines 338-362 around line 350.
+		const [placed] = longPage!.notes;
+		assert.deepEqual(longPage!.rows[placed!.row], { kind: "add", newNo: 350, text: "line 350" });
+		assert.deepEqual(longPage!.rows[FILE_LINE_CAP], { kind: "gap", hidden: 350 - NOTE_CONTEXT - FILE_LINE_CAP });
+		assert.equal(longPage!.rows.length, FILE_LINE_CAP + 1 + 2 * NOTE_CONTEXT + 1);
+		assert.equal(longPage!.more, 400 - 350 - NOTE_CONTEXT);
 	});
 });
 
@@ -135,14 +177,14 @@ describe("rendering the page", () => {
 		assert.deepEqual(JSON.parse(dataScript(renderPage(page))), page);
 	});
 
-	it("keeps hostile summaries, diffs and questions inert: no new elements, and the data reads back", () => {
+	it("keeps hostile summaries, diffs, comments and questions inert: no new elements, and the data reads back", () => {
 		const ordinary = renderPage(
 			buildPage(content(), { project: "demo", createdAt: 0, files: new Map(), random: Math.random }),
 		);
 		for (const hostile of HOSTILE) {
 			const files = new Map([
 				[
-					content().commits[0]!.sha,
+					SHA,
 					[
 						textFile(hostile, [
 							{ kind: "add", newNo: 1, text: hostile },
@@ -151,7 +193,21 @@ describe("rendering the page", () => {
 					],
 				],
 			]);
-			const page = buildPage(content(hostile), { project: hostile, createdAt: 0, files, random: Math.random });
+			const comment: Note = {
+				sha: SHA,
+				path: hostile,
+				side: "new",
+				line: 1,
+				comment: `\`${hostile}\` ${hostile}`,
+				cites: [{ kind: "source", text: hostile }],
+			};
+			const page = buildPage(content(hostile, [comment]), {
+				project: hostile,
+				createdAt: 0,
+				files,
+				random: Math.random,
+			});
+			assert.equal(page.commits[0]!.files[0]!.notes[0]!.comment, comment.comment);
 			const html = renderPage(page);
 			assert.deepEqual(tags(html), tags(ordinary), `${hostile} adds no tag`);
 			const data = dataScript(html);

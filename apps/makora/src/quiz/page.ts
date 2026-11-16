@@ -1,22 +1,34 @@
 // The quiz page: the data it shows (the checked bank, each question's options shuffled, the commits' diffs capped per
-// file) and the self-contained HTML file made from the app's template with that data embedded.
+// file with the annotated lines kept and their notes placed) and the self-contained HTML file made from the app's
+// template with that data embedded.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { DiffFile, FileStatus } from "../git/diff.ts";
-import type { CitedQuestion, Decision, QuizContent, SummarizedCommit } from "./bank.ts";
+import type { CitedQuestion, Decision, Note, QuizContent, SummarizedCommit } from "./bank.ts";
+import { type DiffRow, diffRows, findLine } from "./diff-rows.ts";
 
-/** One file of a commit as the page shows it: diff lines with their `+`, `-`, ` ` or `@@` prefix, at most a cap. */
+/** A row of a file on the page: a diff row, or a run of rows left out between two shown ones. */
+export type PageRow = DiffRow | { readonly kind: "gap"; readonly hidden: number };
+
+/** A note placed on the page: `row` indexes its file's `rows`, `index` is its place in the bank's annotations. */
+export type PageNote = Omit<Note, "sha" | "path"> & { readonly index: number; readonly row: number };
+
+/**
+ * One file of a commit as the page shows it: its first rows up to a cap, plus the rows around each annotated line past
+ * it, with gaps where rows are left out.
+ */
 export type PageFile = {
 	readonly path: string;
 	readonly oldPath?: string;
 	readonly status: FileStatus;
 	readonly added: number;
 	readonly removed: number;
-	readonly lines: readonly string[];
-	/** Diff lines past the cap, not shown. */
+	readonly rows: readonly PageRow[];
+	/** Rows after the last shown one. */
 	readonly more: number;
-	/** Why the file has no lines: a binary file, or a diff git did not produce. */
-	readonly note?: string;
+	/** Why the file has no rows: a binary file, or a diff git did not produce. */
+	readonly reason?: string;
+	readonly notes: readonly PageNote[];
 };
 
 /** A commit of the page with its files. */
@@ -44,18 +56,30 @@ export type PageSources = {
 	readonly random: () => number;
 };
 
-/** Diff lines shown per file; the rest are counted. */
+/** Diff rows shown per file before the notes' rows; the rest are counted. */
 export const FILE_LINE_CAP = 300;
 
-/** The page for `content`: diffs capped per file, and each question's options in a fresh random order. */
+/** Rows shown before and after an annotated line that the cap would hide. */
+export const NOTE_CONTEXT = 12;
+
+/**
+ * The page for `content`: diffs capped per file, each note on its line (which is shown even past the cap), and each
+ * question's options in a fresh random order.
+ */
 export function buildPage(content: QuizContent, sources: PageSources): QuizPage {
+	const notes = content.notes.map((note, index) => ({ ...note, index }));
 	return {
 		project: sources.project,
 		range: content.range,
 		createdAt: sources.createdAt,
 		commits: content.commits.map((commit) => ({
 			...commit,
-			files: (sources.files.get(commit.sha) ?? []).map(pageFile),
+			files: (sources.files.get(commit.sha) ?? []).map((file) =>
+				pageFile(
+					file,
+					notes.filter((note) => note.sha === commit.sha && note.path === file.path),
+				),
+			),
 		})),
 		decisions: content.decisions,
 		questions: content.questions.map((question) => shuffleOptions(question, sources.random)),
@@ -79,7 +103,8 @@ export function shuffleOptions<Q extends { readonly options: readonly string[]; 
 	};
 }
 
-function pageFile(file: DiffFile): PageFile {
+// Notes come from `resolveBank`, which refused any note whose line is not in the file's diff.
+function pageFile(file: DiffFile, notes: readonly (Note & { readonly index: number })[]): PageFile {
 	const base = {
 		path: file.path,
 		...(file.oldPath === undefined ? {} : { oldPath: file.oldPath }),
@@ -87,13 +112,31 @@ function pageFile(file: DiffFile): PageFile {
 		added: file.added,
 		removed: file.removed,
 	};
-	if (file.body.kind === "binary") return { ...base, lines: [], more: 0, note: "binary file" };
-	if (file.body.kind === "omitted") return { ...base, lines: [], more: 0, note: file.body.reason };
-	const lines = file.body.hunks.flatMap((hunk) => [
-		hunk.header,
-		...hunk.lines.map((line) => `${line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}${line.text}`),
-	]);
-	return { ...base, lines: lines.slice(0, FILE_LINE_CAP), more: Math.max(0, lines.length - FILE_LINE_CAP) };
+	if (file.body.kind === "binary") return { ...base, rows: [], more: 0, reason: "binary file", notes: [] };
+	if (file.body.kind === "omitted") return { ...base, rows: [], more: 0, reason: file.body.reason, notes: [] };
+	const all = diffRows(file);
+	const targets = notes.map((note) => findLine(all, note.side, note.line));
+	const shown = new Set(Array.from({ length: Math.min(all.length, FILE_LINE_CAP) }, (_, at) => at));
+	for (const target of targets) {
+		for (let at = Math.max(0, target - NOTE_CONTEXT); at <= Math.min(all.length - 1, target + NOTE_CONTEXT); at++) {
+			shown.add(at);
+		}
+	}
+	const rows: PageRow[] = [];
+	const placed = new Map<number, number>();
+	let previous = -1;
+	for (const at of [...shown].sort((a, b) => a - b)) {
+		if (at > previous + 1) rows.push({ kind: "gap", hidden: at - previous - 1 });
+		placed.set(at, rows.length);
+		rows.push(all[at]!);
+		previous = at;
+	}
+	return {
+		...base,
+		rows,
+		more: all.length - 1 - previous,
+		notes: notes.map(({ sha: _, path: __, ...note }, at) => ({ ...note, row: placed.get(targets[at]!)! })),
+	};
 }
 
 const TEMPLATE = fileURLToPath(new URL("../../assets/quiz/template.html", import.meta.url));

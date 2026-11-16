@@ -19,11 +19,11 @@ one.
 
 Then the agent follows the bundled `session-quiz` skill. It reads the commits (`git log` with stats, `git show`), their
 diffs, the docs and decision entries the range changed, and the session's transcript. It writes a short summary of
-each commit, the list of decisions, and 10 questions, and hands them to makora with `await quiz.publish(bank)`. When the
-page is saved, the transcript shows:
+each commit, the list of decisions, inline comments on the key lines of the diffs, and 10 questions, and hands them to
+makora with `await quiz.publish(bank)`. When the page is saved, the transcript shows:
 
 ```text
-· Quiz saved · ~/.makora/quizzes/makora-2cb3cc24/2026-11-16-1.html · opened in browser · 7ab3e56b3^..HEAD, 10 commit(s)
+· Quiz saved · ~/.makora/quizzes/makora-2cb3cc24/2026-11-16-1.html · opened in browser · 7ab3e56b3^..HEAD, 11 commit(s)
 ```
 
 `/skill:session-quiz` runs the same skill without the `Range:` line `/quiz` adds, so the agent asks which range you
@@ -42,8 +42,19 @@ not trivia:
 
 Each question has a category: `built`, `decided`, `why` or `what-if`. The skill asks for at least 6 `why` or `what-if`
 questions.
-Each cites its sources: commit shas, decision titles or doc paths. If the sources cannot support 10 good questions, the
-agent says so and suggests a wider range instead of padding the quiz.
+Each cites its sources: commit shas, decision titles, doc paths, or `file:line` of an inline comment. If the sources
+cannot support 10 good questions, the agent says so and suggests a wider range instead of padding the quiz.
+
+## Inline comments
+
+Like review comments on a pull request, the agent annotates the diff lines a reader must understand: a key mechanism,
+an invariant, a guard, the line a question is about. The skill asks for roughly 3 to 8 per commit, and none on trivial
+lines. Each says what the line does, why it is there, which decision or failure it relates to, and how it connects to
+other code, in 1 to 4 sentences with `inline code` in backticks, and may cite sources as questions do.
+
+An annotation names its commit, the file as that commit's diff names it, a line number and a side: `new` counts lines
+in the file after the commit (added and unchanged lines), `old` before it (deleted and unchanged lines). The line must
+be inside the diff's hunks.
 
 ## The page
 
@@ -51,15 +62,21 @@ One scroll page, readable at 900 px and on a phone, light or dark with the syste
 
 - **Header.** The project, the range, the dates of its first and last commit, the commit count and `+added −removed`
   lines.
-- **What changed.** One row per commit, oldest first: short sha, subject, the agent's summary and its stat. Clicking a
-  row lists its files; each file opens to its diff, colored, with at most 300 lines and a `truncated, N more lines`
-  note after them. The diffs come from git, not from the agent.
+- **What changed.** One row per commit, oldest first: short sha, subject, the agent's summary, its stat and a
+  `N notes` badge. Clicking a row lists its files, annotated ones first and already open, each with its own `N notes`
+  badge; every file opens to its diff, colored, with old and new line numbers, at most 300 lines and a `truncated, N
+  more lines` note after them. An annotated line past those 300 is still shown, with 12 lines either side and `⋯ N
+  lines not shown` where lines are left out. An annotated line is highlighted, and its comment sits right under it
+  across the file's width: a small `note · new line 42` label, the comment, and its sources as links. On a phone the
+  code scrolls sideways and the comment wraps. **Expand all notes** opens every commit that has notes, and **Collapse
+  all notes** closes them again. The diffs come from git, not from the agent.
 - **Decisions.** The title and one line of each decision.
 - **Questions.** The 10 questions, each with its category and 4 options in an order makora shuffled for that question.
   A counter shows how many are answered.
 - **Submit all.** The page scores itself: `Score: 7/10 — Proficient`, a row of 10 squares (green right, red wrong),
   and the weak spots by category. Every question shows whether it was right, the correct answer, the explanation and
-  its sources; a commit source links to its row and opens it, a decision source to its entry. Unanswered questions
+  its sources; a commit source links to its row and opens it, a decision source to its entry, and a `file:line`
+  source opens the commit and the file and jumps to that comment. Unanswered questions
   count as wrong and say so. An "Incorrect answers — review these" block repeats each missed question with your answer.
 - **Retake** clears the answers and shuffles every question's options again.
 
@@ -80,7 +97,8 @@ request. It works the same opened from disk later, or sent to someone else.
 
 `~/.makora/quizzes/<repo>-<hash>/<YYYY-MM-DD>-<n>.html`, one folder per repository (the same `<repo>-<hash>` names as
 the worktree folders) and `n` counting the day's quizzes from 1. makora never deletes them. A page holds every diff of
-its range, capped per file, so a large range makes a large file: the 10 commits of makora's own history made 2.4 MB.
+its range, capped per file, so a large range makes a large file: the 11 commits of makora's own history, with 40
+comments, made 4.1 MB.
 
 ## When the bank is wrong
 
@@ -91,7 +109,11 @@ agent fixes them and publishes again:
   known category, at least one cite, no unknown fields;
 - the range: git must read it, and it must have between 1 and 200 commits;
 - every commit of the range has a summary, and every summary key is one of its commits;
-- every cite that looks like a sha (7 to 40 hex digits) is exactly one commit of the range;
+- every cite that looks like a sha (7 to 40 hex digits) is exactly one commit of the range, and every `file:line` cite
+  is exactly one annotation;
+- every annotation names a commit of the range, a file of that commit's diff with a text diff, and a line inside its
+  hunks on its side; the error lists the lines that side has, such as `its new lines there are 1-40, 88-120`. Its
+  comment is not empty and at most 600 characters;
 - no question repeats an option.
 
 How it is built: [architecture/quiz.md](../architecture/quiz.md).

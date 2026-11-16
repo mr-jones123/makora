@@ -137,9 +137,10 @@ Open items of phase 3:
 ## The session quiz (built)
 
 `/quiz` has the agent write 10 multiple-choice questions on what the session's commits built and decided, from the
-commits, their diffs, the docs and decisions they changed, and the transcript, through the bundled `session-quiz`
-skill. makora checks the bank, renders one self-contained HTML page with the commits' diffs, shuffles each question's
-options, saves it under `~/.makora/quizzes/` and opens it; the page scores itself, and nothing is recorded
+commits, their diffs, the docs and decisions they changed, and the transcript, through the bundled `session-quiz` skill,
+with inline comments on the diff lines that matter. makora checks the bank, the comments against the diffs included,
+renders one self-contained HTML page with the commits' diffs and the comments under their lines, shuffles each
+question's options, saves it under `~/.makora/quizzes/` and opens it; the page scores itself, and nothing is recorded
 ([features/quiz.md](features/quiz.md), [architecture/quiz.md](architecture/quiz.md)). Verified with the fake model in
 `test/quiz.test.ts`, unit tests of the checks, the shuffle and the escaping, and a real quiz on makora's own history in
 headless Chrome, light and dark, before and after submitting.
@@ -149,7 +150,7 @@ Open items of the quiz:
 | Item | Needs |
 | --- | --- |
 | Quiz results are not kept: a score lives only in the page | The memory system, which decides what the owner's results feed into |
-| A page holds every diff of its range (2.4 MB for makora's 10 commits) | A cap per commit, if larger ranges make pages slow |
+| A page holds every diff of its range (4.1 MB for makora's 11 commits and 40 comments) | A cap per commit, or a more compact row encoding, if larger ranges make pages slow |
 | `/quiz all` leaves finding the project's first commit to the agent | A project setting, if the agent's choice proves unreliable |
 
 ## Later phases (planned)

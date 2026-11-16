@@ -57,6 +57,23 @@ function bank(where: Workspace) {
 		range: `${where.base.slice(0, 12)}..HEAD`,
 		summaries: { [page]: "Adds a page whose text closes a script tag.", [docs]: "Documents how to run it." },
 		decisions: [{ title: "Usage in the README", summary: "Users read the README first." }],
+		annotations: [
+			{
+				commit: page,
+				file: "page.html",
+				line: 2,
+				side: "new" as const,
+				comment: "Closes a script tag in `page.html`: </script><img src=x onerror=alert(1)>.",
+			},
+			{
+				commit: docs,
+				file: "README.md",
+				line: 3,
+				side: "new" as const,
+				comment: "The usage line the decision asks for.",
+				cites: ["Usage in the README"],
+			},
+		],
 		questions: Array.from({ length: 10 }, (_, index) => ({
 			question: `Quiz question ${index + 1}: why does the README carry usage?`,
 			options: [
@@ -68,7 +85,7 @@ function bank(where: Workspace) {
 			correct: 0,
 			explanation: "The decision says users read the README first.",
 			category: "why",
-			cites: [index % 2 === 0 ? docs : page, "Usage in the README"],
+			cites: [index % 2 === 0 ? docs : page, "Usage in the README", "README.md:3"],
 		})),
 	};
 }
@@ -144,14 +161,23 @@ describe("/quiz with the fake model", () => {
 			);
 			for (const question of page.questions) {
 				assert.match(question.options[question.correct]!, /^Users read it first/);
-				assert.deepEqual(question.cites[1], { kind: "decision", text: "Usage in the README", index: 0 });
+				assert.deepEqual(question.cites.slice(1), [
+					{ kind: "decision", text: "Usage in the README", index: 0 },
+					{ kind: "note", text: "README.md:3", index: 1 },
+				]);
 			}
-			const htmlFile = page.commits[0]!.files.find((file) => file.path === "page.html");
-			assert.deepEqual(htmlFile?.lines, [
-				"@@ -0,0 +1,2 @@",
-				"+<p>before</p>",
-				"+</script><img src=x onerror=alert(1)>",
+			const htmlFile = page.commits[0]!.files.find((file) => file.path === "page.html")!;
+			assert.deepEqual(htmlFile.rows, [
+				{ kind: "hunk", text: "@@ -0,0 +1,2 @@" },
+				{ kind: "add", newNo: 1, text: "<p>before</p>" },
+				{ kind: "add", newNo: 2, text: "</script><img src=x onerror=alert(1)>" },
 			]);
+			assert.deepEqual(
+				htmlFile.notes.map((note) => [note.index, htmlFile.rows[note.row], note.comment]),
+				[[0, htmlFile.rows[2], bank(where).annotations[0]!.comment]],
+			);
+			const readme = page.commits[1]!.files.find((file) => file.path === "README.md")!;
+			assert.deepEqual(readme.rows[readme.notes[0]!.row], { kind: "add", newNo: 3, text: "usage: run it" });
 			const saved = session.notices.filter((notice) => notice.level === "info").map((notice) => notice.message);
 			assert.equal(saved.length, 1);
 			assert.match(saved[0]!, /^Quiz saved · .*\.html · opened in browser · [0-9a-f]{12}\.\.HEAD, 2 commit\(s\)$/);
@@ -168,6 +194,7 @@ describe("/quiz with the fake model", () => {
 			const bad = bank(where);
 			bad.questions[2] = { ...bad.questions[2]!, options: ["only", "three", "options"] };
 			bad.questions[4] = { ...bad.questions[4]!, cites: ["deadbeef"] };
+			bad.annotations.push({ ...bad.annotations[1]!, line: 9 });
 			writeFileSync(join(where.repo, "quiz-bank.json"), JSON.stringify(bad));
 			const schema = await quiz(session, where, "");
 			assert.match(schema, /quiz\.publish refused:/);
@@ -177,7 +204,11 @@ describe("/quiz with the fake model", () => {
 			delete bad.summaries[where.session[1]!.slice(0, 8)];
 			writeFileSync(join(where.repo, "quiz-bank.json"), JSON.stringify(bad));
 			const semantic = await quiz(session, where, "");
-			assert.match(semantic, /The bank has 2 problem\(s\); fix them and publish again:/);
+			assert.match(semantic, /The bank has 3 problem\(s\); fix them and publish again:/);
+			assert.match(
+				semantic,
+				/- annotations\[2\]\.line: README\.md has no new line 9 in [0-9a-f]{9}'s diff; its new lines there are 1-3/,
+			);
 			assert.match(semantic, /- summaries: no summary for [0-9a-f]{9} \(docs: usage\)/);
 			assert.match(semantic, /- questions\[4\]\.cites\[0\]: deadbeef is not a commit of/);
 			assert.deepEqual(opened, []);

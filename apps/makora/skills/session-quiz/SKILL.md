@@ -1,11 +1,11 @@
 ---
 name: session-quiz
-description: Quiz the user on what a session or a commit range built and decided. Writes 10 multiple-choice questions from the commits, docs and transcript, and hands them to makora, which renders a self-scoring HTML page and opens it. Use for /quiz, or when the user asks to be quizzed on recent work.
+description: Quiz the user on what a session or a commit range built and decided. Writes 10 multiple-choice questions and inline comments on the key lines of the diffs, from the commits, docs and transcript, and hands them to makora, which renders a self-scoring HTML page and opens it. Use for /quiz, or when the user asks to be quizzed on recent work.
 ---
 
 # Session quiz
 
-The user wants to think hard about what was built and decided. You write a question bank from the sources. Makora checks it, renders the page, shuffles the options and opens the page in the browser. The page scores itself, and nothing comes back to you.
+The user wants to think hard about what was built and decided. You write a question bank from the sources, with inline comments on the diff lines a reader must understand, as a reviewer would. Makora checks it, renders the page, shuffles the options and opens the page in the browser. The page scores itself, and nothing comes back to you.
 
 ## Rules
 
@@ -26,26 +26,36 @@ The user wants to think hard about what was built and decided. You write a quest
 4. **Read the transcript.** `await ctx.transcript(limit=200)` returns this session's recent messages. Note what the user asked for, what was decided and why, and what was rejected.
 5. **Summarize each commit.** Write one or two sentences per commit, saying what it changed and why, from its message, diff and docs. The page shows the summary under the commit's subject.
 6. **List the decisions.** Write one entry per decision taken in the range or the session: a short title and one line saying what was decided and why. Use the decision log's own titles where it has them. List only decisions a source states.
-7. **Write 10 questions.** Mix the categories. Use `built` for what a change does, `decided` for what was chosen, `why` for the reason, and `what-if` for what would happen otherwise. Write at least 6 of the 10 as `why` or `what-if`. Each question has:
+7. **Annotate the diffs.** Write roughly 3 to 8 annotations per commit, on the lines a reader must understand: a key mechanism, an invariant, a guard, the line a question is about. Do not narrate trivial lines such as imports, renames or formatting. A docs-only commit may need fewer. Each annotation has:
+   - `commit`: the commit's sha, 7 or more hex digits;
+   - `file`: the file's path as the commit's diff names it;
+   - `side`: `"new"` for a line the commit added or kept (its number in the file after the commit), `"old"` for a line it deleted (its number before). Most annotations are on `"new"` lines;
+   - `line`: the line number on that side. It must be a line inside the diff's hunks, so an added, deleted or context line. Find it with `await bash("git show <sha>:<path> | grep -n '<text>'")` for the new side, or `git show <sha>^:<path>` for the old side, and check it against the hunk headers of `git show <sha> -- <path>`;
+   - `comment`: plain text, 1 to 4 sentences, at most 600 characters, with `inline code` in backticks. Say what the line does, why it is there, which decision or failure it relates to, and how it connects to other code. Every claim comes from a source;
+   - `cites` (optional): commit shas, decision titles or doc paths, as for questions.
+   Makora shows every annotated line, even one past the 300 diff lines it shows per file.
+8. **Write 10 questions.** Mix the categories. Use `built` for what a change does, `decided` for what was chosen, `why` for the reason, and `what-if` for what would happen otherwise. Write at least 6 of the 10 as `why` or `what-if`. Each question has:
    - `question`: one clear question;
    - `options`: exactly 4 distinct answers of similar length and style;
    - `correct`: the index of the right option, 0 to 3. Makora shuffles the options, so their order here does not matter;
    - `explanation`: why the right answer is right, and why the most tempting wrong one is wrong;
    - `category`: `built`, `decided`, `why` or `what-if`;
-   - `cites`: the sources, at least one. A commit is its sha, 7 or more hex digits, and must be in the range. A decision is its exact title from your decisions list, which the page links. A doc is its path.
+   - `cites`: the sources, at least one. A commit is its sha, 7 or more hex digits, and must be in the range. A decision is its exact title from your decisions list, which the page links. An annotation is its `file:line`, such as `src/session.ts:142`, which the page links to that note; name a line only one annotation has. A doc is its path.
    If the sources cannot support 10 good questions, tell the user, suggest a wider range, and stop. Never pad the bank with invented or trivial questions.
-8. **Publish.** In one cell:
+9. **Publish.** In one cell:
 
    ```
    result = await quiz.publish({
        "range": "<the range>",
        "summaries": {"<sha>": "<summary>", ...},  # one per commit of the range
        "decisions": [{"title": "...", "summary": "..."}, ...],
+       "annotations": [{"commit": "<sha>", "file": "src/x.ts", "line": 42, "side": "new",
+                        "comment": "...", "cites": ["<decision title>"]}, ...],
        "questions": [{"question": "...", "options": ["...", "...", "...", "..."], "correct": 2,
-                      "explanation": "...", "category": "why", "cites": ["<sha>", "<decision title>"]}, ...],
+                      "explanation": "...", "category": "why", "cites": ["<sha>", "<decision title>", "src/x.ts:42"]}, ...],
    })
    print(result)
    ```
 
    Makora checks the bank before it renders anything. A `HostError` lists every problem. Fix each one and publish again.
-9. **Report.** Tell the user where the page is saved (`result["path"]`), the range, and the commit count. Say whether it opened in the browser (`result["opened"]`). Do not list the questions or the answers.
+10. **Report.** Tell the user where the page is saved (`result["path"]`), the range, and the commit count. Say whether it opened in the browser (`result["opened"]`). Do not list the questions or the answers.

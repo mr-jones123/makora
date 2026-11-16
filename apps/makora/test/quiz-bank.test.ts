@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { compile } from "@earendil-works/pi-schema";
+import type { DiffFile } from "../src/git/diff.ts";
 import type { Commit } from "../src/git/log.ts";
 import { BankSchema, type QuizBank, resolveBank } from "../src/quiz/bank.ts";
 
@@ -29,6 +30,83 @@ const OTHER: Commit = {
 	removed: 2,
 };
 
+/** FIRST changes src/a.ts (old lines 1-3, new lines 1-4) and adds a binary logo; OTHER adds a 400-line doc. */
+const FILES = new Map<string, readonly DiffFile[]>([
+	[
+		FIRST.sha,
+		[
+			{
+				path: "src/a.ts",
+				status: "M",
+				added: 2,
+				removed: 1,
+				body: {
+					kind: "text",
+					hunks: [
+						{
+							header: "@@ -1,3 +1,4 @@",
+							oldStart: 1,
+							oldLines: 3,
+							newStart: 1,
+							newLines: 4,
+							lines: [
+								{ kind: "context", oldNo: 1, newNo: 1, text: "keep" },
+								{ kind: "del", oldNo: 2, text: "old" },
+								{ kind: "add", newNo: 2, text: "new" },
+								{ kind: "add", newNo: 3, text: "more" },
+								{ kind: "context", oldNo: 3, newNo: 4, text: "end" },
+							],
+						},
+					],
+				},
+			},
+			{ path: "logo.png", status: "A", added: 0, removed: 0, body: { kind: "binary" } },
+		],
+	],
+	[SECOND.sha, []],
+	[
+		OTHER.sha,
+		[
+			{
+				path: "docs/b.md",
+				status: "A",
+				added: 400,
+				removed: 0,
+				body: {
+					kind: "text",
+					hunks: [
+						{
+							header: "@@ -0,0 +1,400 @@",
+							oldStart: 0,
+							oldLines: 0,
+							newStart: 1,
+							newLines: 400,
+							lines: Array.from({ length: 400 }, (_, index) => ({
+								kind: "add" as const,
+								newNo: index + 1,
+								text: `doc ${index + 1}`,
+							})),
+						},
+					],
+				},
+			},
+		],
+	],
+]);
+
+const COMMITS = [FIRST, SECOND, OTHER];
+
+function annotation(change: Partial<QuizBank["annotations"][number]> = {}) {
+	return {
+		commit: "a1b2c3d4",
+		file: "src/a.ts",
+		line: 2,
+		side: "new" as const,
+		comment: "Replaces `old`, because the decision says so.",
+		...change,
+	};
+}
+
 function question(index: number, cites: string[] = ["a1b2c3d4"]) {
 	return {
 		question: `Why was choice ${index} made?`,
@@ -45,6 +123,7 @@ function bank(change: Partial<QuizBank> = {}): QuizBank {
 		range: "a1b2c3d4^..HEAD",
 		summaries: { a1b2c3d4: "Adds the first part.", a1b2c3d9: "Fixes the second.", "0f0f0f0": "Documents it." },
 		decisions: [{ title: "Static page", summary: "The page scores itself; nothing is sent back." }],
+		annotations: [annotation()],
 		questions: Array.from({ length: 10 }, (_, index) => question(index)),
 		...change,
 	};
@@ -67,6 +146,18 @@ describe("the bank's schema", () => {
 			["/questions/0/explanation", { ...question(0), explanation: "   " }],
 			["/questions/0", { ...question(0), hint: "extra" }],
 		];
+		for (const [path, change] of [
+			["/annotations/0/comment", { comment: "x".repeat(601) }],
+			["/annotations/0/comment", { comment: " " }],
+			["/annotations/0/side", { side: "both" }],
+			["/annotations/0/line", { line: 0 }],
+		] as const) {
+			const errors = schema.errors({ ...bank(), annotations: [{ ...annotation(), ...change }] });
+			assert.ok(
+				errors.some((error) => error.path.startsWith(path)),
+				`${JSON.stringify(change)} fails at ${path}: ${JSON.stringify(errors)}`,
+			);
+		}
 		for (const [path, first] of cases) {
 			const questions = [first, ...bank().questions.slice(1)];
 			const errors = schema.errors({ ...bank(), questions });
@@ -87,8 +178,11 @@ describe("the bank's schema", () => {
 
 describe("checking a bank against its range", () => {
 	it("gives each commit, oldest first, its summary by sha prefix, and resolves each cite", () => {
-		const questions = [question(0, ["a1b2c3d4", "static page", "docs/decisions.md"]), ...bank().questions.slice(1)];
-		const resolved = resolveBank(bank({ questions }), [FIRST, SECOND, OTHER]);
+		const questions = [
+			question(0, ["a1b2c3d4", "static page", "docs/decisions.md", "src/a.ts:2"]),
+			...bank().questions.slice(1),
+		];
+		const resolved = resolveBank(bank({ questions }), COMMITS, FILES);
 		assert.equal(resolved.kind, "ok");
 		if (resolved.kind !== "ok") return;
 		assert.deepEqual(
@@ -103,6 +197,54 @@ describe("checking a bank against its range", () => {
 			{ kind: "commit", text: "a1b2c3d4", sha: FIRST.sha },
 			{ kind: "decision", text: "static page", index: 0 },
 			{ kind: "source", text: "docs/decisions.md" },
+			{ kind: "note", text: "src/a.ts:2", index: 0 },
+		]);
+	});
+
+	it("places annotations on a line of their commit's diff, on either side, past the page's cap too", () => {
+		const annotations = [
+			annotation({ cites: ["static page", "src/a.ts:4"] }),
+			annotation({ line: 2, side: "old" }),
+			annotation({ line: 4, comment: "  Ends the file.  " }),
+			annotation({ commit: "0f0f0f0", file: "docs/b.md", line: 350 }),
+		];
+		const resolved = resolveBank(bank({ annotations }), COMMITS, FILES);
+		assert.equal(resolved.kind, "ok", JSON.stringify(resolved));
+		if (resolved.kind !== "ok") return;
+		assert.deepEqual(
+			resolved.value.notes.map((note) => [note.sha, note.path, note.side, note.line, note.comment]),
+			[
+				[FIRST.sha, "src/a.ts", "new", 2, "Replaces `old`, because the decision says so."],
+				[FIRST.sha, "src/a.ts", "old", 2, "Replaces `old`, because the decision says so."],
+				[FIRST.sha, "src/a.ts", "new", 4, "Ends the file."],
+				[OTHER.sha, "docs/b.md", "new", 350, "Replaces `old`, because the decision says so."],
+			],
+		);
+		assert.deepEqual(resolved.value.notes[0]!.cites, [
+			{ kind: "decision", text: "static page", index: 0 },
+			{ kind: "note", text: "src/a.ts:4", index: 2 },
+		]);
+	});
+
+	it("refuses annotations off their commit's diff: a bad commit, file, line or side, a binary file, a cite of no note", () => {
+		const annotations = [
+			annotation({ commit: "deadbeef" }),
+			annotation({ file: "src/missing.ts" }),
+			annotation({ line: 99 }),
+			annotation({ line: 4, side: "old" }),
+			annotation({ file: "logo.png", line: 1 }),
+		];
+		const questions = [question(0, ["src/a.ts:9"]), ...bank().questions.slice(1)];
+		const resolved = resolveBank(bank({ annotations, questions }), COMMITS, FILES);
+		assert.equal(resolved.kind, "invalid");
+		if (resolved.kind !== "invalid") return;
+		assert.deepEqual(resolved.errors, [
+			"annotations[0].commit: deadbeef is not a commit of a1b2c3d4^..HEAD",
+			"annotations[1].file: src/missing.ts is not in a1b2c3d4e's diff",
+			"annotations[2].line: src/a.ts has no new line 99 in a1b2c3d4e's diff; its new lines there are 1-4",
+			"annotations[3].line: src/a.ts has no old line 4 in a1b2c3d4e's diff; its old lines there are 1-3",
+			"annotations[4].file: logo.png has no text diff in a1b2c3d4e",
+			"questions[0].cites[0]: no annotation at src/a.ts:9",
 		]);
 	});
 
@@ -112,11 +254,11 @@ describe("checking a bank against its range", () => {
 			{ ...question(1, ["a1b2c3d"]), options: ["Same", "same", "Other", "Third"] },
 			...bank().questions.slice(2),
 		];
-		const resolved = resolveBank(bank({ summaries: { a1b2c3d4: "Adds the first part." }, questions }), [
-			FIRST,
-			SECOND,
-			OTHER,
-		]);
+		const resolved = resolveBank(
+			bank({ summaries: { a1b2c3d4: "Adds the first part." }, questions }),
+			COMMITS,
+			FILES,
+		);
 		assert.equal(resolved.kind, "invalid");
 		if (resolved.kind !== "invalid") return;
 		const expected = [
@@ -136,7 +278,7 @@ describe("checking a bank against its range", () => {
 
 	it("refuses a range without commits", () => {
 		const questions = bank().questions.map((each) => ({ ...each, cites: ["docs/decisions.md"] }));
-		const resolved = resolveBank(bank({ summaries: {}, questions }), []);
+		const resolved = resolveBank(bank({ summaries: {}, annotations: [], questions }), [], new Map());
 		assert.deepEqual(resolved, { kind: "invalid", errors: ["range: a1b2c3d4^..HEAD has no commits"] });
 	});
 });

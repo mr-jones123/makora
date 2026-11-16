@@ -1,5 +1,5 @@
-// The `quiz_publish` tool behind `await quiz.publish(bank)` in a cell: checks the bank against the git range it names,
-// renders the quiz page with makora's template and the range's diffs, saves it under the makora home, and opens it.
+// The `quiz_publish` tool behind `await quiz.publish(bank)` in a cell: checks the bank against the git range it names
+// and that range's diffs, renders the quiz page with makora's template, saves it under the makora home, and opens it.
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
@@ -48,13 +48,13 @@ export function createQuizTool(options: QuizOptions): ToolRegistration<typeof Qu
 			if (commits.length > MAX_COMMITS) {
 				throw new Error(`range: ${bank.range} has ${commits.length} commits; a quiz takes at most ${MAX_COMMITS}`);
 			}
-			const resolved = resolveBank(bank, commits);
+			const files = new Map<string, readonly DiffFile[]>();
+			for (const commit of commits) files.set(commit.sha, await commitFiles(repo, commit.sha));
+			const resolved = resolveBank(bank, commits, files);
 			if (resolved.kind === "invalid") {
 				const list = resolved.errors.map((error) => `- ${error}`).join("\n");
 				throw new Error(`The bank has ${resolved.errors.length} problem(s); fix them and publish again:\n${list}`);
 			}
-			const files = new Map<string, readonly DiffFile[]>();
-			for (const commit of commits) files.set(commit.sha, await commitFiles(repo, commit.sha));
 			const createdAt = api.now();
 			const page = buildPage(resolved.value, { project: place.name, createdAt, files, random: Math.random });
 			const path = save(join(options.quizzes, place.dir), new Date(createdAt), renderPage(page));

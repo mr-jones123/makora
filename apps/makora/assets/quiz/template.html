@@ -66,7 +66,6 @@ del { color: var(--bad); text-decoration: none; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
 .commits, .decisions { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .commit { overflow: hidden; scroll-margin-top: 16px; }
-.commit.flash { outline: 2px solid var(--accent); }
 .commit-head { width: 100%; display: grid; grid-template-columns: 18px auto 1fr auto; gap: 4px 10px; align-items: baseline; padding: 12px 14px 4px; background: none; border: 0; text-align: left; cursor: pointer; }
 .commit-head:hover .subject { text-decoration: underline; }
 .chevron { color: var(--muted); transition: transform 0.15s; display: inline-block; }
@@ -81,13 +80,26 @@ del { color: var(--bad); text-decoration: none; }
 .file > summary .path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); }
 .badge { font-family: var(--mono); font-size: 0.75rem; padding: 0 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
 .diff { margin: 0; overflow-x: auto; font: 12.5px/1.45 var(--mono); border-top: 1px solid var(--line); }
-.diff div { white-space: pre; padding: 0 10px; min-width: max-content; }
-.diff .add { background: var(--add); color: var(--add-ink); }
-.diff .del { background: var(--del); color: var(--del-ink); }
-.diff .hunk { background: var(--hunk); color: var(--hunk-ink); }
-.note { padding: 6px 10px; color: var(--muted); font-size: 0.85rem; font-style: italic; }
+.row { display: flex; min-width: max-content; }
+.row .ln { flex: none; width: 4.5ch; padding-right: 1ch; text-align: right; color: var(--muted); opacity: 0.7; user-select: none; }
+.row .code { white-space: pre; padding: 0 10px 0 4px; }
+.row.hunk .code, .row.gap .code { padding-left: 10px; }
+.row.add { background: var(--add); color: var(--add-ink); }
+.row.del { background: var(--del); color: var(--del-ink); }
+.row.hunk { background: var(--hunk); color: var(--hunk-ink); }
+.row.gap { color: var(--muted); font-style: italic; }
+.row.noted { box-shadow: inset 4px 0 0 var(--accent); background: var(--accent-soft); color: var(--ink); }
+.note-box { margin: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); border-left: 4px solid var(--accent); background: var(--card); font-size: 0.92rem; scroll-margin-top: 80px; }
+.note-box p { margin: 2px 0 6px; overflow-wrap: anywhere; }
+.note-box code { font-size: 0.85em; padding: 0 4px; border-radius: 4px; background: var(--accent-soft); }
+.note-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.notes-badge { font-size: 0.72rem; font-weight: 600; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.aside { padding: 6px 10px; color: var(--muted); font-size: 0.85rem; font-style: italic; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 40px 0 12px; }
+.section-head h2 { margin: 0; }
+.small { padding: 4px 12px; font-size: 0.85rem; }
+.flash { outline: 2px solid var(--accent); }
 .decision { padding: 12px 14px; scroll-margin-top: 16px; }
-.decision.flash { outline: 2px solid var(--accent); }
 .decision strong { display: block; }
 .decision span { color: var(--muted); }
 .questions { display: grid; gap: 14px; }
@@ -147,7 +159,10 @@ del { color: var(--bad); text-decoration: none; }
 		<p class="meta" id="meta"></p>
 	</header>
 	<section aria-labelledby="changes-title">
-		<h2 id="changes-title">What changed</h2>
+		<div class="section-head">
+			<h2 id="changes-title">What changed</h2>
+			<button type="button" class="secondary small" id="notes-toggle" aria-pressed="false" hidden>Expand all notes</button>
+		</div>
 		<ol class="commits" id="commits"></ol>
 	</section>
 	<section aria-labelledby="decisions-title">
@@ -212,82 +227,179 @@ function header() {
 	);
 }
 
+const commitViews = [];
+const noteHomes = new Map();
+
 function commits() {
 	const list = document.getElementById("commits");
-	for (const commit of quiz.commits) {
-		const files = el("div", { class: "files", hidden: true });
+	quiz.commits.forEach((commit, commitIndex) => {
+		const notes = commit.files.reduce((sum, file) => sum + file.notes.length, 0);
+		// Annotated files come first and open with their commit.
+		const files = commit.files.map((file, fileIndex) => ({ file, fileIndex })).sort((a, b) => Number(b.file.notes.length > 0) - Number(a.file.notes.length > 0));
+		const box = el("div", { class: "files", hidden: true });
 		const head = el(
 			"button",
 			{ type: "button", class: "commit-head", "aria-expanded": "false" },
 			el("span", { class: "chevron", "aria-hidden": "true" }, "\u25b8"),
 			el("code", { class: "sha" }, shortSha(commit.sha)),
 			el("span", { class: "subject" }, commit.subject),
-			el("span", { class: "stat" }, stat(commit.added, commit.removed), ` \u00b7 ${count(commit.files.length, "file")}`),
+			el("span", { class: "stat" }, stat(commit.added, commit.removed), ` \u00b7 ${count(commit.files.length, "file")}`, notes > 0 ? [" ", el("span", { class: "notes-badge" }, count(notes, "note"))] : ""),
 		);
-		const row = el("li", { class: "card commit", id: `commit-${shortSha(commit.sha)}` }, head, el("p", { class: "summary" }, commit.summary), files);
-		head.addEventListener("click", () => setOpen(row, files, commit, !row.hasAttribute("data-open")));
+		const row = el("li", { class: "card commit", id: `commit-${shortSha(commit.sha)}` }, head, el("p", { class: "summary" }, commit.summary), box);
+		const view = { commit, row, head, box, files, notes, fileViews: new Map() };
+		commitViews.push(view);
+		for (const { file, fileIndex } of files) for (const note of file.notes) noteHomes.set(note.index, { view, fileIndex });
+		head.addEventListener("click", () => setOpen(view, !row.hasAttribute("data-open")));
 		list.append(row);
+	});
+	const annotated = commitViews.filter((view) => view.notes > 0);
+	const toggle = document.getElementById("notes-toggle");
+	if (annotated.length === 0) return;
+	toggle.hidden = false;
+	toggle.addEventListener("click", () => {
+		const expand = toggle.getAttribute("aria-pressed") !== "true";
+		for (const view of annotated) setOpen(view, expand);
+		toggle.setAttribute("aria-pressed", String(expand));
+		toggle.textContent = expand ? "Collapse all notes" : "Expand all notes";
+	});
+}
+
+function setOpen(view, open) {
+	view.row.toggleAttribute("data-open", open);
+	view.head.setAttribute("aria-expanded", String(open));
+	view.box.hidden = !open;
+	if (!open || view.box.childElementCount > 0) return;
+	if (view.files.length === 0) view.box.append(el("div", { class: "aside" }, "No file changes."));
+	for (const { file, fileIndex } of view.files) {
+		const fileView = makeFileView(file);
+		view.fileViews.set(fileIndex, fileView);
+		view.box.append(fileView.details);
+		if (file.notes.length > 0) fileView.open();
 	}
 }
 
-function setOpen(row, files, commit, open) {
-	row.toggleAttribute("data-open", open);
-	row.querySelector(".commit-head").setAttribute("aria-expanded", String(open));
-	files.hidden = !open;
-	if (open && files.childElementCount === 0) {
-		if (commit.files.length === 0) files.append(el("div", { class: "note" }, "No file changes."));
-		for (const file of commit.files) files.append(fileView(file));
-	}
-}
-
-function fileView(file) {
+function makeFileView(file) {
 	const name = file.oldPath === undefined ? file.path : `${file.oldPath} \u2192 ${file.path}`;
 	const details = el(
 		"details",
 		{ class: "file" },
-		el("summary", {}, el("span", { class: "badge" }, file.status), el("span", { class: "path" }, name), el("span", { class: "stat" }, stat(file.added, file.removed))),
+		el(
+			"summary",
+			{},
+			el("span", { class: "badge" }, file.status),
+			el("span", { class: "path" }, name),
+			file.notes.length > 0 ? el("span", { class: "notes-badge" }, count(file.notes.length, "note")) : "",
+			el("span", { class: "stat" }, stat(file.added, file.removed)),
+		),
 	);
+	const render = () => {
+		if (details.childElementCount > 1) return;
+		if (file.reason !== undefined) return details.append(el("div", { class: "aside" }, file.reason));
+		const notesAt = new Map();
+		for (const note of file.notes) notesAt.set(note.row, [...(notesAt.get(note.row) || []), note]);
+		let chunk = el("div", { class: "diff" });
+		details.append(chunk);
+		file.rows.forEach((row, index) => {
+			const notes = notesAt.get(index);
+			chunk.append(rowView(row, notes !== undefined));
+			if (notes === undefined) return;
+			for (const note of notes) details.append(noteView(note));
+			chunk = el("div", { class: "diff" });
+			details.append(chunk);
+		});
+		if (chunk.childElementCount === 0) chunk.remove();
+		if (file.more > 0) details.append(el("div", { class: "aside" }, `truncated, ${count(file.more, "more line")}`));
+	};
 	details.addEventListener("toggle", () => {
-		if (!details.open || details.childElementCount > 1) return;
-		if (file.note !== undefined) return details.append(el("div", { class: "note" }, file.note));
-		const diff = el("div", { class: "diff" });
-		for (const line of file.lines) {
-			const kind = line.startsWith("@@") ? "hunk" : line[0] === "+" ? "add" : line[0] === "-" ? "del" : "ctx";
-			diff.append(el("div", { class: kind }, line || " "));
-		}
-		details.append(diff);
-		if (file.more > 0) details.append(el("div", { class: "note" }, `truncated, ${count(file.more, "more line")}`));
+		if (details.open) render();
 	});
-	return details;
+	return {
+		details,
+		open() {
+			render();
+			details.open = true;
+		},
+	};
+}
+
+const MARKS = { add: "+", del: "-", context: " " };
+
+function rowView(row, noted) {
+	if (row.kind === "gap") return el("div", { class: "row gap" }, el("span", { class: "code" }, `\u22ef ${count(row.hidden, "line")} not shown`));
+	if (row.kind === "hunk") return el("div", { class: "row hunk" }, el("span", { class: "code" }, row.text));
+	return el(
+		"div",
+		{ class: `row ${row.kind}${noted ? " noted" : ""}` },
+		el("span", { class: "ln" }, row.oldNo === undefined ? "" : row.oldNo),
+		el("span", { class: "ln" }, row.newNo === undefined ? "" : row.newNo),
+		el("span", { class: "code" }, MARKS[row.kind] + row.text),
+	);
+}
+
+// Backticks mark inline code in a comment, as in markdown; everything goes in as text.
+function richText(text) {
+	return text.split("`").map((part, index) => (index % 2 === 1 ? el("code", {}, part) : part));
+}
+
+function noteView(note) {
+	return el(
+		"div",
+		{ class: "note-box", id: `note-${note.index + 1}` },
+		el("div", { class: "note-label" }, `note \u00b7 ${note.side} line ${note.line}`),
+		el("p", {}, richText(note.comment)),
+		note.cites.length > 0 ? el("div", { class: "cites" }, "Sources:", note.cites.map(citeView)) : "",
+	);
 }
 
 function decisions() {
 	const list = document.getElementById("decisions");
-	if (quiz.decisions.length === 0) list.append(el("li", { class: "note" }, "No decisions in this range."));
+	if (quiz.decisions.length === 0) list.append(el("li", { class: "aside" }, "No decisions in this range."));
 	quiz.decisions.forEach((decision, index) => {
 		list.append(el("li", { class: "card decision", id: `decision-${index + 1}` }, el("strong", {}, decision.title), el("span", {}, decision.summary)));
 	});
 }
 
+function flash(node) {
+	// An instant jump: the page can be megabytes of diff, and a smooth scroll that long loses the reader.
+	node.scrollIntoView({ block: "center" });
+	node.classList.add("flash");
+	setTimeout(() => node.classList.remove("flash"), 1600);
+}
+
 function reveal(target) {
 	const row = document.getElementById(target);
 	if (row === null) return;
-	if (row.classList.contains("commit") && !row.hasAttribute("data-open")) row.querySelector(".commit-head").click();
-	row.scrollIntoView({ behavior: "smooth", block: "start" });
-	row.classList.add("flash");
-	setTimeout(() => row.classList.remove("flash"), 1600);
+	const view = commitViews.find((each) => each.row === row);
+	if (view !== undefined) setOpen(view, true);
+	flash(row);
+}
+
+function revealNote(index) {
+	const home = noteHomes.get(index);
+	setOpen(home.view, true);
+	home.view.fileViews.get(home.fileIndex).open();
+	flash(document.getElementById(`note-${index + 1}`));
 }
 
 function citeView(cite) {
-	const target = cite.kind === "commit" ? `commit-${shortSha(cite.sha)}` : cite.kind === "decision" ? `decision-${cite.index + 1}` : undefined;
-	if (target === undefined) return el("code", {}, cite.text);
-	return el("a", {
-		href: `#${target}`,
-		onclick: (event) => {
-			event.preventDefault();
-			reveal(target);
-		},
-	}, cite.kind === "commit" ? shortSha(cite.sha) : cite.text);
+	const link = (href, text, go) =>
+		el("a", {
+			href,
+			onclick: (event) => {
+				event.preventDefault();
+				go();
+			},
+		}, text);
+	switch (cite.kind) {
+		case "commit":
+			return link(`#commit-${shortSha(cite.sha)}`, shortSha(cite.sha), () => reveal(`commit-${shortSha(cite.sha)}`));
+		case "decision":
+			return link(`#decision-${cite.index + 1}`, cite.text, () => reveal(`decision-${cite.index + 1}`));
+		case "note":
+			return link(`#note-${cite.index + 1}`, cite.text, () => revealNote(cite.index));
+		default:
+			return el("code", {}, cite.text);
+	}
 }
 
 const cards = [];
