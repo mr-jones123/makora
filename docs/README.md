@@ -12,6 +12,7 @@ fix one of them in the same change.
 | 1 | App skeleton: CLI, Durable sessions, TUI, Claude subscription login with accounts, bundled pstack and no-mistakes with a sync CI job | **Built**, committed on `main`, not pushed |
 | 2 | Persistent Python REPL as the model's one tool: file and shell helpers, `llm`, `ctx`, per-cell snapshots, `--ephemeral`; plus the `/diff` view | **Built**, with `/fork`; open: pruning |
 | 3 | Subagents, each with its own worktree and REPL; `wait_agents`; the agents dashboard | **Built**, not committed; with pstack model tiers (`/pstack`) |
+| Quiz | `/quiz`: a self-scoring HTML quiz on what a session built and decided | **Built**, not committed; the wiki waits for the memory system |
 | 4+ | Background service, autonomous mode, evals against Prime Agent, self-evolution, sandboxes | Planned |
 
 Details and open items: [roadmap.md](roadmap.md).
@@ -30,6 +31,7 @@ Details and open items: [roadmap.md](roadmap.md).
      session, print mode.
    - [features/accounts.md](features/accounts.md): login, multiple accounts, plan usage, how Anthropic bills it.
    - [features/skills.md](features/skills.md): bundled pstack and no-mistakes, where skills are found, conflicts.
+   - [features/quiz.md](features/quiz.md): `/quiz`, the quiz page, where pages go, what makora checks.
 4. Architecture, how it is built:
    - [architecture/overview.md](architecture/overview.md): the big picture, process model, module map, files on disk.
    - [architecture/runtime.md](architecture/runtime.md): the Durable harness wiring, prompt, models, settings.
@@ -40,6 +42,8 @@ Details and open items: [roadmap.md](roadmap.md).
    - [architecture/forks.md](architecture/forks.md): forks: the fork document, worktrees, switching, removing.
    - [architecture/subagents.md](architecture/subagents.md): subagents as built: the anchor, records, worktrees,
      limits, messaging, `wait_agents`, merge, crash safety.
+   - [architecture/quiz.md](architecture/quiz.md): the session quiz as built: the range, the bank's checks, the page,
+     escaping.
 5. Reference: [reference/cli.md](reference/cli.md), [reference/configuration.md](reference/configuration.md).
 6. [development.md](development.md): working on makora, checks, tests, CI, upstream sync.
 7. [decisions.md](decisions.md): every decision and its reason, newest last.

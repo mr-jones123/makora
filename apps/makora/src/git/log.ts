@@ -14,7 +14,7 @@ export interface Commit {
 /** The `git log` arguments whose output `parseLog` reads: one record per commit, then its numstat lines. */
 export const LOG_FORMAT = ["--format=%x1e%H%x1f%at%x1f%an%x1f%s", "--numstat"] as const;
 
-/** The commits of `git log` output made with `LOG_FORMAT`, newest first. */
+/** The commits of `git log` output made with `LOG_FORMAT`, in its order: newest first unless `--reverse`. */
 export function parseLog(output: string): Commit[] {
 	const commits: Commit[] = [];
 	for (const record of output.split("\x1e").slice(1)) {

@@ -70,7 +70,8 @@ below wheel + gap + wordmark.
    after a session closes are ignored, so switching sessions mid-run cannot crash the process.
 5. A 125 ms ticker re-renders spinners and elapsed times; plan usage refreshes every 5 minutes.
 
-Local lines (command output `·`, notices `⚠`) are added to the feed but not to Durable, so they are not saved.
+Local lines (command output and `info` session notices such as `Quiz saved · …` as `·`, `warning` notices as `⚠`) are
+added to the feed but not to Durable, so they are not saved.
 
 ## Keys
 

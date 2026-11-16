@@ -13,6 +13,8 @@ export interface HomePaths {
 	readonly skills: string;
 	/** Fork worktrees, and write subagents' by default: `<repo>-<hash>/<session>/<conversation>`. */
 	readonly worktrees: string;
+	/** Quiz pages: `<repo>-<hash>/<YYYY-MM-DD>-<n>.html`. */
+	readonly quizzes: string;
 }
 
 /** Makora's home directory, absolute: `MAKORA_HOME` resolved against the cwd, or `~/.makora`. */
@@ -32,6 +34,7 @@ export function homePaths(home: string): HomePaths {
 		agents: join(home, "AGENTS.md"),
 		skills: join(home, "skills"),
 		worktrees: join(home, "worktrees"),
+		quizzes: join(home, "quizzes"),
 	};
 }
 

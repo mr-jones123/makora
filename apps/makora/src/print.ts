@@ -3,7 +3,7 @@ import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import { type Cursor, type EntryId, type EntryRecord, LiveDoc, type LiveState } from "@earendil-works/pi-durable";
 import { AGENT_MESSAGE_ENTRY, AGENT_RESULT_ENTRY } from "./agents/prompts.ts";
-import type { MakoraSession } from "./session.ts";
+import type { MakoraSession, SessionNotice } from "./session.ts";
 import { toolSummary } from "./tool-cell.ts";
 import { describeRunFailure, messageText, responseEnd, toolCellOf, transcriptRows } from "./transcript-rows.ts";
 
@@ -35,8 +35,9 @@ export async function runPrint(
 		for (const entry of call.value.entries) printer.entry(entry, true);
 		printer.partial(call.value.docs["pi.live"] as LiveState | undefined);
 	});
-	for (const notice of session.notices) output.stderr(`⚠ ${notice.message}\n`);
-	const unsubscribe = session.onNotice((notice) => output.stderr(`⚠ ${notice.message}\n`));
+	const show = (notice: SessionNotice) => output.stderr(`${notice.level === "info" ? "·" : "⚠"} ${notice.message}\n`);
+	for (const notice of session.notices) show(notice);
+	const unsubscribe = session.onNotice(show);
 	try {
 		if (replay) {
 			await session.root.waitForIdle(context);

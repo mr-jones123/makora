@@ -1,5 +1,4 @@
 // Slash commands: the table the editor's autocomplete lists and the TUI dispatches typed commands through.
-import { spawn } from "node:child_process";
 import { dirname } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
@@ -15,6 +14,7 @@ import type { SelectItem, SlashCommand } from "@earendil-works/pi-tui";
 import type { MakoraApp } from "../app.ts";
 import { loginAccount } from "../auth/login.ts";
 import { createFork, forkPoints } from "../fork.ts";
+import { openInBrowser } from "../open.ts";
 import { tildify } from "../paths.ts";
 import {
 	BUDGETS,
@@ -26,8 +26,9 @@ import {
 	type Tier,
 	type TierModel,
 } from "../pstack.ts";
+import { quizRequest } from "../quiz/request.ts";
 import { listSessions, type SessionMeta } from "../sessions.ts";
-import { readSkillBody, type Skill } from "../skills.ts";
+import { type Skill, skillMessage } from "../skills.ts";
 import type { Dialogs } from "./dialogs.ts";
 import { PICKER_HEIGHT_PERCENT, PICKER_MIN_WIDTH, PstackPicker } from "./pstack-picker.ts";
 import type { SessionFeed } from "./session-feed.ts";
@@ -58,7 +59,7 @@ export interface CommandHost {
 /** One slash command. */
 interface Command {
 	readonly description: string;
-	run(host: CommandHost, args: string): Promise<void>;
+	run(host: CommandHost, args: string, skills: readonly Skill[]): Promise<void>;
 }
 
 const COMMANDS: Readonly<Record<string, Command>> = {
@@ -74,6 +75,10 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 	diff: {
 		description: "Show git changes and history; stage, revert, ask about a line",
 		run: async (host) => host.openDiff(),
+	},
+	quiz: {
+		description: "Quiz yourself on what this session built and decided: [range | all], a page in the browser",
+		run: quiz,
 	},
 	compact: {
 		description: "Compact the context, with optional instructions",
@@ -115,15 +120,14 @@ export async function runCommand(host: CommandHost, text: string, skills: readon
 	const args = rest.join(" ").trim();
 	if (name.startsWith("skill:")) {
 		const command = SKILL_COMMANDS[name.slice("skill:".length)];
-		if (command !== undefined) return COMMANDS[command]!.run(host, args);
+		if (command !== undefined) return COMMANDS[command]!.run(host, args, skills);
 		const skill = skills.find((candidate) => candidate.name === name.slice("skill:".length));
 		if (skill === undefined) return host.notice(`No skill named ${name.slice("skill:".length)}.`);
-		const body = `<skill name="${skill.name}" location="${skill.path}">\n${readSkillBody(skill)}\n</skill>`;
-		return host.submit(args ? `${body}\n\n${args}` : body);
+		return host.submit(skillMessage(skill, args));
 	}
 	const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined;
 	if (command === undefined) return host.notice(`Unknown command /${name}.`);
-	await command.run(host, args);
+	await command.run(host, args, skills);
 }
 
 async function login(host: CommandHost): Promise<void> {
@@ -154,11 +158,11 @@ async function login(host: CommandHost): Promise<void> {
 					host.info(
 						`Open this URL to log in${event.instructions ? ` (${event.instructions})` : ""}:\n${event.url}`,
 					);
-					openUrl(event.url);
+					void openInBrowser(event.url);
 					break;
 				case "device_code":
 					host.info(`Enter the code ${event.userCode} at ${event.verificationUri}`);
-					openUrl(event.verificationUri);
+					void openInBrowser(event.verificationUri);
 					break;
 				case "info":
 				case "progress":
@@ -212,15 +216,17 @@ async function answerPrompt(host: CommandHost, prompt: AuthPrompt, cancel: Abort
 	throw new Error("Login cancelled");
 }
 
-function openUrl(url: string): void {
-	const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
-	try {
-		spawn(opener, [url], { stdio: "ignore", detached: true })
-			.on("error", () => {})
-			.unref();
-	} catch {
-		// No opener: the URL is in the transcript.
-	}
+const QUIZ_SKILL = "session-quiz";
+
+/** Submit the session-quiz skill for the range `args` names (this session's commits by default). */
+async function quiz(host: CommandHost, args: string, skills: readonly Skill[]): Promise<void> {
+	const skill = skills.find((candidate) => candidate.name === QUIZ_SKILL);
+	if (skill === undefined) return host.notice(`The ${QUIZ_SKILL} skill is missing; /quiz needs it.`);
+	const feed = host.feed();
+	const request = await quizRequest(skill, feed.state.cwd, feed.session.meta.createdAt, args);
+	if (request.kind === "refused") return host.info(request.reason);
+	host.info(request.summary);
+	await host.submit(request.text);
 }
 
 async function accounts(host: CommandHost): Promise<void> {

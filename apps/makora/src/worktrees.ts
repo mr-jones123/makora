@@ -11,7 +11,9 @@ import { git } from "./repl/git-tree.ts";
 export type RepoPlace = {
 	/** Top level of the folder's worktree. */
 	readonly top: string;
-	/** `<repo dir name>-<short hash of its path>`: the repository's directory under a worktree root. */
+	/** The main repository's directory name, shared by all its worktrees. */
+	readonly name: string;
+	/** `<name>-<short hash of its path>`: the repository's directory under a worktree root. */
 	readonly dir: string;
 	/** The folder relative to `top`. */
 	readonly relative: string;
@@ -31,7 +33,7 @@ export async function findRepo(cwd: string): Promise<RepoPlace | undefined> {
 	const common = resolve(top, await git(top, ["rev-parse", "--git-common-dir"]));
 	const main = basename(common) === ".git" ? dirname(common) : common;
 	const hash = createHash("sha256").update(main).digest("hex").slice(0, 8);
-	return { top, dir: `${basename(main)}-${hash}`, relative: relative(top, realpathSync(cwd)) };
+	return { top, name: basename(main), dir: `${basename(main)}-${hash}`, relative: relative(top, realpathSync(cwd)) };
 }
 
 /** The worktree of conversation `id`: `<root>/<repo dir>/<session>/<conversation>`. */

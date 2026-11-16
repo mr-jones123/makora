@@ -1,12 +1,13 @@
 // One open session: its lock, its Durable harness over `session.sqlite` (or memory, when ephemeral), its root
-// conversation, the Python kernels of its conversations, and its git writes. An ephemeral session removes its worktrees
-// when it closes.
+// conversation, the Python kernels of its conversations, its git writes, and its quiz tool. An ephemeral session removes
+// its worktrees when it closes.
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
 import { uuidv7 } from "@earendil-works/pi-ai";
 import {
 	type Conversation,
 	createRegistry,
+	defineExtension,
 	Harness,
 	MemoryStorage,
 	type ModelRef,
@@ -24,6 +25,8 @@ import { agentRoots, defaultModel, type MakoraApp, worktreeRoots } from "./app.t
 import { makoraExtension } from "./extension.ts";
 import { GitWrites } from "./git/writes.ts";
 import { KernelManager } from "./kernel/manager.ts";
+import { openInBrowser } from "./open.ts";
+import { createQuizTool } from "./quiz/publish.ts";
 import { createRepl, type Repl } from "./repl/extension.ts";
 import type { SnapshotPolicy } from "./repl/python-tool.ts";
 import { applyCleanup, planCleanup, sessionWorktrees } from "./session-delete.ts";
@@ -36,9 +39,13 @@ import {
 	updateSession,
 } from "./sessions.ts";
 
-/** A notice for the user about the session itself: restored work and harness failures. */
+/**
+ * A notice for the user about the session itself: `warning` for restored work and harness failures, `info` for news
+ * such as a saved quiz.
+ */
 export interface SessionNotice {
 	readonly at: number;
+	readonly level: "info" | "warning";
 	readonly message: string;
 }
 
@@ -79,6 +86,8 @@ export interface OpenOptions {
 	 * mode), a command the settings do not approve is skipped.
 	 */
 	readonly askSetup?: (request: SetupRequest) => Promise<boolean>;
+	/** Open a saved quiz page; default the platform's browser opener. Tests pass their own. */
+	readonly openBrowser?: (path: string) => Promise<boolean>;
 }
 
 /** Where a session's state lives. */
@@ -124,11 +133,12 @@ async function open(
 		store.kind === "persistent" ? lockSession(store.sessionsDir, meta.id) : undefined;
 	const notices: SessionNotice[] = [];
 	const listeners = new Set<(notice: SessionNotice) => void>();
-	const notify = (message: string): void => {
-		const notice = { at: Date.now(), message };
+	const announce = (level: SessionNotice["level"], message: string): void => {
+		const notice = { at: Date.now(), level, message };
 		notices.push(notice);
 		for (const listener of listeners) listener(notice);
 	};
+	const notify = (message: string): void => announce("warning", message);
 	for (const warning of app.settings.warnings) notify(warning);
 	const dir = store.kind === "persistent" ? sessionDir(store.sessionsDir, meta.id) : undefined;
 	const gitWrites = new GitWrites();
@@ -157,6 +167,13 @@ async function open(
 			notify,
 		});
 		registry.install(agents.extension);
+		const quiz = createQuizTool({
+			quizzes: app.paths.quizzes,
+			defaultCwd: meta.cwd,
+			open: options.openBrowser ?? openInBrowser,
+			inform: (message) => announce("info", message),
+		});
+		registry.install(defineExtension({ name: "makora-quiz", tools: [quiz] }));
 		const storage: Storage =
 			store.kind === "persistent"
 				? await openNodeSqliteStorage(sessionDatabase(store.sessionsDir, meta.id))

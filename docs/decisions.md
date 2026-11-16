@@ -200,3 +200,16 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   failing the spawn. The prompt lists the roles per tier in a few lines while `poteto-mode` is among the skills, and says
   so when both tiers are one model, because seats on one model are not multi-model evidence. `/skill:setup-pstack`
   opens the picker instead of submitting the skill, whose steps write a Cursor rule makora never reads.
+- **The quiz and the wiki are separate, and the wiki waits for the memory system (owner, 2026-11-16).** The first plan
+  had `/wiki` write the project's record into the owner's Obsidian vault and `/quiz` report its scores there. The wiki
+  is the project's long-term record, the material the memory system will work from, so it is designed later as part of
+  the memory system. `/quiz` ships alone and touches no vault.
+- **The quiz is a static page that scores itself, with nothing recorded (owner, 2026-11-16).** makora renders one
+  self-contained HTML file and opens it; the page scores in the browser, and its result stays there. The first plan
+  served the page on `127.0.0.1` and took the answers back by a POST, to record them in the session and the wiki.
+  Without a record to keep, a server would only add a listening port, its lifetime and a fallback for a page opened
+  later from disk. A file works the same opened now, tomorrow or on another machine. The agent writes the questions, but
+  makora's code shuffles the options, takes the diffs from git and renders the page, and the bank is checked at
+  `quiz.publish` (10 questions of 4 options, cited shas in the range, a summary per commit), so the model cannot invent
+  a commit or place the right answer. Pages live in `MAKORA_HOME/quizzes/<repo>-<hash>/`, next to makora's other
+  per-repository state, not in the repository, which they would dirty. See [features/quiz.md](features/quiz.md).

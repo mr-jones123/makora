@@ -20,6 +20,7 @@
 | `skills/<name>/SKILL.md` | You | User skills; see [features/skills.md](../features/skills.md) |
 | `sessions/<id>/` | makora | See [features/sessions.md](../features/sessions.md) |
 | `worktrees/<repo>-<hash>/<session>/<conversation>/` | `/fork` and write subagents, removed by `x` in the agents dashboard or `remove(name)` | Git worktrees of forks ([architecture/forks.md](../architecture/forks.md#the-worktree)) and of write subagents unless `worktrees.write` moves them ([features/subagents.md](../features/subagents.md#where-worktrees-live-and-why)) |
+| `quizzes/<repo>-<hash>/<YYYY-MM-DD>-<n>.html` | `quiz.publish`, from `/quiz` | Self-contained quiz pages, one folder per repository; makora never deletes them ([features/quiz.md](../features/quiz.md#where-pages-go)) |
 | `python/venv/` | makora, on the first REPL cell | The Python environment kernels run in; delete it to force a rebuild ([architecture/repl.md](../architecture/repl.md#the-python-environment)) |
 
 ### `settings.json` fields

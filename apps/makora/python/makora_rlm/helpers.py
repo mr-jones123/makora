@@ -1,5 +1,5 @@
-"""The functions a cell calls into makora: Durable's coding tools, one model call, the conversation's context, and its
-subagents."""
+"""The functions a cell calls into makora: Durable's coding tools, one model call, the conversation's context, its
+subagents, and the session quiz."""
 
 # `Agents.list` shadows the builtin inside its class body; postponed annotations keep `list[...]` meaning the builtin.
 from __future__ import annotations
@@ -77,6 +77,21 @@ class Agents:
 
     def __repr__(self) -> str:
         return "<makora agents: await agents.list(), agents.get(name), agents.recent(name, limit=6)>"
+
+
+class Quiz:
+    """`quiz` in a cell: hands a session-quiz question bank to makora."""
+
+    def __init__(self, host: Host):
+        self._host = host
+
+    async def publish(self, bank: dict[str, Any]) -> dict[str, Any]:
+        """Check `bank` against the git range it names, render the quiz page into makora's home and open it in the
+        browser; returns `{path, range, commits, opened}`. Raises `HostError` listing every problem with the bank."""
+        return await self._host.call("quiz", {"bank": bank})
+
+    def __repr__(self) -> str:
+        return "<makora quiz: await quiz.publish(bank)>"
 
 
 async def _agents(host: Host, action: str, args: dict[str, Any]) -> Any:
@@ -185,4 +200,5 @@ def build(host: Host) -> dict[str, Any]:
         "bash": bash,
         "llm": llm,
         "ctx": Context(host),
+        "quiz": Quiz(host),
     }

@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta name="color-scheme" content="light dark">
+<title>makora quiz</title>
+<style>
+:root {
+	--bg: #f7f5f0;
+	--card: #ffffff;
+	--ink: #1d1b16;
+	--muted: #6b665c;
+	--line: #e3ded3;
+	--accent: #9a6b16;
+	--accent-soft: #f3e7cf;
+	--good: #1f7a3f;
+	--good-soft: #e3f3e8;
+	--bad: #b3261e;
+	--bad-soft: #fbe6e4;
+	--add: #e6f4ea;
+	--add-ink: #1a5e32;
+	--del: #fdecea;
+	--del-ink: #8c1d18;
+	--hunk: #eef1f8;
+	--hunk-ink: #3d4f7a;
+	--mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+	--sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #15140f;
+		--card: #1e1c17;
+		--ink: #ece7dc;
+		--muted: #a39c8d;
+		--line: #34312a;
+		--accent: #d9a648;
+		--accent-soft: #3a2f1a;
+		--good: #6fcf8f;
+		--good-soft: #1b3324;
+		--bad: #f08a80;
+		--bad-soft: #3d1f1c;
+		--add: #17301f;
+		--add-ink: #8fdca8;
+		--del: #3a1c1a;
+		--del-ink: #f2a39b;
+		--hunk: #1f2535;
+		--hunk-ink: #9fb2e0;
+	}
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--sans); }
+body { margin: 0; }
+main { max-width: 900px; margin: 0 auto; padding: 32px 20px 96px; }
+h1 { font-size: 1.9rem; line-height: 1.2; margin: 4px 0 8px; }
+h2 { font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 40px 0 12px; }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+button { font: inherit; color: inherit; }
+a { color: var(--accent); }
+.eyebrow { margin: 0; color: var(--accent); font-weight: 600; font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); margin: 0; }
+.meta b { color: var(--ink); font-weight: 600; }
+ins { color: var(--good); text-decoration: none; }
+del { color: var(--bad); text-decoration: none; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.commits, .decisions { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.commit { overflow: hidden; scroll-margin-top: 16px; }
+.commit.flash { outline: 2px solid var(--accent); }
+.commit-head { width: 100%; display: grid; grid-template-columns: 18px auto 1fr auto; gap: 4px 10px; align-items: baseline; padding: 12px 14px 4px; background: none; border: 0; text-align: left; cursor: pointer; }
+.commit-head:hover .subject { text-decoration: underline; }
+.chevron { color: var(--muted); transition: transform 0.15s; display: inline-block; }
+.commit[data-open] .chevron { transform: rotate(90deg); }
+.sha { color: var(--accent); }
+.subject { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.stat { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.summary { margin: 0; padding: 0 14px 12px 42px; color: var(--muted); }
+.files { border-top: 1px solid var(--line); padding: 8px 10px 10px; display: grid; gap: 6px; }
+.file { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.file > summary { cursor: pointer; padding: 6px 10px; display: flex; gap: 10px; align-items: baseline; font-size: 0.88rem; }
+.file > summary .path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); }
+.badge { font-family: var(--mono); font-size: 0.75rem; padding: 0 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
+.diff { margin: 0; overflow-x: auto; font: 12.5px/1.45 var(--mono); border-top: 1px solid var(--line); }
+.diff div { white-space: pre; padding: 0 10px; min-width: max-content; }
+.diff .add { background: var(--add); color: var(--add-ink); }
+.diff .del { background: var(--del); color: var(--del-ink); }
+.diff .hunk { background: var(--hunk); color: var(--hunk-ink); }
+.note { padding: 6px 10px; color: var(--muted); font-size: 0.85rem; font-style: italic; }
+.decision { padding: 12px 14px; scroll-margin-top: 16px; }
+.decision.flash { outline: 2px solid var(--accent); }
+.decision strong { display: block; }
+.decision span { color: var(--muted); }
+.questions { display: grid; gap: 14px; }
+.question { margin: 0; padding: 16px 16px 14px; min-width: 0; }
+.question legend { float: left; width: 100%; padding: 0; margin-bottom: 6px; display: flex; gap: 8px; align-items: center; font-size: 0.85rem; color: var(--muted); }
+.question .prompt { clear: both; margin: 0 0 12px; font-weight: 600; font-size: 1.05rem; }
+.tag { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.options { display: grid; gap: 8px; }
+.option { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.option:hover { border-color: var(--accent); }
+.option input { margin: 4px 0 0; accent-color: var(--accent); }
+.option.is-correct { border-color: var(--good); background: var(--good-soft); }
+.option.is-wrong { border-color: var(--bad); background: var(--bad-soft); }
+.scored .option { cursor: default; }
+.feedback { margin-top: 12px; padding: 10px 12px; border-radius: 8px; border-left: 4px solid var(--line); background: var(--bg); }
+.feedback.good { border-left-color: var(--good); }
+.feedback.bad { border-left-color: var(--bad); }
+.feedback p { margin: 0 0 6px; }
+.verdict { font-weight: 700; }
+.good .verdict { color: var(--good); }
+.bad .verdict { color: var(--bad); }
+.cites { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 0.85rem; color: var(--muted); }
+.cites a, .cites code { padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); }
+.cites a { text-decoration: none; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 20px; }
+.primary, .secondary { border-radius: 8px; padding: 10px 20px; cursor: pointer; font-weight: 600; }
+.primary { background: var(--accent); color: var(--card); border: 0; }
+.secondary { background: none; border: 1px solid var(--accent); color: var(--accent); }
+.progress { color: var(--muted); font-size: 0.9rem; }
+.results { margin-top: 24px; padding: 18px; scroll-margin-top: 16px; }
+.score { font-size: 1.5rem; font-weight: 700; margin: 0; }
+.grade-line { margin: 2px 0 12px; color: var(--muted); }
+.board { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; margin: 12px 0; }
+.board a { text-align: center; text-decoration: none; padding: 6px 0; border-radius: 6px; font-weight: 700; font-size: 0.85rem; }
+.board .right { background: var(--good-soft); color: var(--good); }
+.board .wrong { background: var(--bad-soft); color: var(--bad); }
+.review h3 { font-size: 1rem; margin: 18px 0 8px; }
+.review ol { margin: 0; padding-left: 22px; display: grid; gap: 12px; }
+.review li p { margin: 0 0 4px; }
+.weak { margin: 8px 0 0; color: var(--muted); }
+@media (max-width: 600px) {
+	main { padding: 20px 12px 72px; }
+	h1 { font-size: 1.5rem; }
+	.commit-head { grid-template-columns: 18px 1fr; }
+	.commit-head .subject { grid-column: 2; }
+	.commit-head .stat { grid-column: 2; white-space: normal; }
+	.summary { padding-left: 42px; }
+	.board { grid-template-columns: repeat(5, 1fr); }
+}
+</style>
+</head>
+<body>
+<main>
+	<header>
+		<p class="eyebrow">makora · session quiz</p>
+		<h1 id="project"></h1>
+		<p class="meta" id="meta"></p>
+	</header>
+	<section aria-labelledby="changes-title">
+		<h2 id="changes-title">What changed</h2>
+		<ol class="commits" id="commits"></ol>
+	</section>
+	<section aria-labelledby="decisions-title">
+		<h2 id="decisions-title">Decisions</h2>
+		<ol class="decisions" id="decisions"></ol>
+	</section>
+	<section aria-labelledby="questions-title">
+		<h2 id="questions-title">Questions</h2>
+		<form class="questions" id="questions"></form>
+		<div class="actions">
+			<button type="button" class="primary" id="submit">Submit all</button>
+			<button type="button" class="secondary" id="retake" hidden>Retake</button>
+			<span class="progress" id="progress"></span>
+		</div>
+		<div class="card results" id="results" hidden></div>
+	</section>
+</main>
+<script id="quiz-data" type="application/json">__MAKORA_QUIZ_DATA__</script>
+<script>
+"use strict";
+const quiz = JSON.parse(document.getElementById("quiz-data").textContent);
+const GRADES = [
+	[9, "Mastered", "Excellent understanding."],
+	[7, "Proficient", "Good grasp, minor gaps."],
+	[5, "Developing", "Fundamentals understood, needs review."],
+	[3, "Beginning", "Significant gaps, review recommended."],
+	[0, "Not yet", "Start again from what changed."],
+];
+
+function el(tag, attributes, ...children) {
+	const node = document.createElement(tag);
+	for (const [name, value] of Object.entries(attributes || {})) {
+		if (value === false || value === undefined) continue;
+		if (name.startsWith("on")) node.addEventListener(name.slice(2), value);
+		else node.setAttribute(name, value === true ? "" : String(value));
+	}
+	for (const child of children.flat()) {
+		if (child === undefined || child === null || child === false) continue;
+		node.append(typeof child === "string" || typeof child === "number" ? document.createTextNode(String(child)) : child);
+	}
+	return node;
+}
+
+const shortSha = (sha) => sha.slice(0, 7);
+const count = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const day = (ms) => new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+const stat = (added, removed) => [el("ins", {}, `+${added}`), " ", el("del", {}, `\u2212${removed}`)];
+
+function header() {
+	document.title = `${quiz.project} quiz \u00b7 ${quiz.range}`;
+	document.getElementById("project").textContent = quiz.project;
+	const added = quiz.commits.reduce((sum, commit) => sum + commit.added, 0);
+	const removed = quiz.commits.reduce((sum, commit) => sum + commit.removed, 0);
+	const first = quiz.commits[0];
+	const last = quiz.commits[quiz.commits.length - 1];
+	const dates = first === undefined ? "" : day(first.date) === day(last.date) ? day(first.date) : `${day(first.date)} \u2013 ${day(last.date)}`;
+	document.getElementById("meta").append(
+		el("span", {}, el("code", {}, quiz.range)),
+		el("span", {}, dates),
+		el("span", {}, el("b", {}, count(quiz.commits.length, "commit"))),
+		el("span", {}, stat(added, removed), " lines"),
+	);
+}
+
+function commits() {
+	const list = document.getElementById("commits");
+	for (const commit of quiz.commits) {
+		const files = el("div", { class: "files", hidden: true });
+		const head = el(
+			"button",
+			{ type: "button", class: "commit-head", "aria-expanded": "false" },
+			el("span", { class: "chevron", "aria-hidden": "true" }, "\u25b8"),
+			el("code", { class: "sha" }, shortSha(commit.sha)),
+			el("span", { class: "subject" }, commit.subject),
+			el("span", { class: "stat" }, stat(commit.added, commit.removed), ` \u00b7 ${count(commit.files.length, "file")}`),
+		);
+		const row = el("li", { class: "card commit", id: `commit-${shortSha(commit.sha)}` }, head, el("p", { class: "summary" }, commit.summary), files);
+		head.addEventListener("click", () => setOpen(row, files, commit, !row.hasAttribute("data-open")));
+		list.append(row);
+	}
+}
+
+function setOpen(row, files, commit, open) {
+	row.toggleAttribute("data-open", open);
+	row.querySelector(".commit-head").setAttribute("aria-expanded", String(open));
+	files.hidden = !open;
+	if (open && files.childElementCount === 0) {
+		if (commit.files.length === 0) files.append(el("div", { class: "note" }, "No file changes."));
+		for (const file of commit.files) files.append(fileView(file));
+	}
+}
+
+function fileView(file) {
+	const name = file.oldPath === undefined ? file.path : `${file.oldPath} \u2192 ${file.path}`;
+	const details = el(
+		"details",
+		{ class: "file" },
+		el("summary", {}, el("span", { class: "badge" }, file.status), el("span", { class: "path" }, name), el("span", { class: "stat" }, stat(file.added, file.removed))),
+	);
+	details.addEventListener("toggle", () => {
+		if (!details.open || details.childElementCount > 1) return;
+		if (file.note !== undefined) return details.append(el("div", { class: "note" }, file.note));
+		const diff = el("div", { class: "diff" });
+		for (const line of file.lines) {
+			const kind = line.startsWith("@@") ? "hunk" : line[0] === "+" ? "add" : line[0] === "-" ? "del" : "ctx";
+			diff.append(el("div", { class: kind }, line || " "));
+		}
+		details.append(diff);
+		if (file.more > 0) details.append(el("div", { class: "note" }, `truncated, ${count(file.more, "more line")}`));
+	});
+	return details;
+}
+
+function decisions() {
+	const list = document.getElementById("decisions");
+	if (quiz.decisions.length === 0) list.append(el("li", { class: "note" }, "No decisions in this range."));
+	quiz.decisions.forEach((decision, index) => {
+		list.append(el("li", { class: "card decision", id: `decision-${index + 1}` }, el("strong", {}, decision.title), el("span", {}, decision.summary)));
+	});
+}
+
+function reveal(target) {
+	const row = document.getElementById(target);
+	if (row === null) return;
+	if (row.classList.contains("commit") && !row.hasAttribute("data-open")) row.querySelector(".commit-head").click();
+	row.scrollIntoView({ behavior: "smooth", block: "start" });
+	row.classList.add("flash");
+	setTimeout(() => row.classList.remove("flash"), 1600);
+}
+
+function citeView(cite) {
+	const target = cite.kind === "commit" ? `commit-${shortSha(cite.sha)}` : cite.kind === "decision" ? `decision-${cite.index + 1}` : undefined;
+	if (target === undefined) return el("code", {}, cite.text);
+	return el("a", {
+		href: `#${target}`,
+		onclick: (event) => {
+			event.preventDefault();
+			reveal(target);
+		},
+	}, cite.kind === "commit" ? shortSha(cite.sha) : cite.text);
+}
+
+const cards = [];
+
+function questions() {
+	const form = document.getElementById("questions");
+	quiz.questions.forEach((question, index) => {
+		const options = el("div", { class: "options" });
+		const labels = question.options.map((option, value) =>
+			el("label", { class: "option" }, el("input", { type: "radio", name: `q${index + 1}`, value, onchange: progress }), el("span", {}, option)),
+		);
+		options.append(...labels);
+		const feedback = el("div", { class: "feedback", hidden: true });
+		const card = el(
+			"fieldset",
+			{ class: "card question", id: `q-${index + 1}` },
+			el("legend", {}, el("span", {}, `Question ${index + 1} of ${quiz.questions.length}`), el("span", { class: "tag" }, question.category)),
+			el("p", { class: "prompt" }, question.question),
+			options,
+			feedback,
+		);
+		cards.push({ question, card, options, labels, feedback });
+		form.append(card);
+	});
+}
+
+function chosen(entry) {
+	const input = entry.card.querySelector("input:checked");
+	return input === null ? undefined : Number(input.value);
+}
+
+function progress() {
+	const answered = cards.filter((entry) => chosen(entry) !== undefined).length;
+	document.getElementById("progress").textContent = `${answered} of ${cards.length} answered`;
+}
+
+function submit() {
+	const outcomes = cards.map((entry, index) => {
+		const answer = chosen(entry);
+		const right = answer === entry.question.correct;
+		entry.card.classList.add("scored");
+		entry.labels.forEach((label, value) => {
+			label.querySelector("input").disabled = true;
+			label.classList.toggle("is-correct", value === entry.question.correct);
+			label.classList.toggle("is-wrong", value === answer && !right);
+		});
+		const correctText = entry.question.options[entry.question.correct];
+		const verdict = right ? "Correct." : answer === undefined ? "Not answered, so it counts as wrong." : "Wrong.";
+		entry.feedback.replaceChildren(
+			el("p", {}, el("span", { class: "verdict" }, verdict), right ? "" : ` The answer is: ${correctText}`),
+			el("p", {}, entry.question.explanation),
+			el("div", { class: "cites" }, "Sources:", entry.question.cites.map(citeView)),
+		);
+		entry.feedback.className = `feedback ${right ? "good" : "bad"}`;
+		entry.feedback.hidden = false;
+		return { index, entry, answer, right };
+	});
+	results(outcomes);
+	document.getElementById("submit").hidden = true;
+	document.getElementById("retake").hidden = false;
+	document.getElementById("progress").textContent = "";
+}
+
+function results(outcomes) {
+	const score = outcomes.filter((outcome) => outcome.right).length;
+	const [, grade, line] = GRADES.find(([floor]) => score >= floor);
+	const missed = outcomes.filter((outcome) => !outcome.right);
+	const box = document.getElementById("results");
+	const board = el("div", { class: "board" }, outcomes.map((outcome) =>
+		el("a", {
+			href: `#q-${outcome.index + 1}`,
+			class: outcome.right ? "right" : "wrong",
+			title: outcome.right ? "right" : outcome.answer === undefined ? "not answered" : "wrong",
+		}, `${outcome.index + 1}`),
+	));
+	const children = [el("p", { class: "score" }, `Score: ${score}/${outcomes.length} \u2014 ${grade}`), el("p", { class: "grade-line" }, line), board];
+	if (missed.length > 0) {
+		const weak = {};
+		for (const outcome of missed) weak[outcome.entry.question.category] = (weak[outcome.entry.question.category] || 0) + 1;
+		children.push(
+			el("p", { class: "weak" }, "Weak spots: ", Object.entries(weak).sort((a, b) => b[1] - a[1]).map(([category, n]) => `${category} (${n})`).join(", ")),
+			el("div", { class: "review" },
+				el("h3", {}, "Incorrect answers \u2014 review these"),
+				el("ol", {}, missed.map((outcome) => {
+					const question = outcome.entry.question;
+					return el("li", { value: outcome.index + 1 },
+						el("p", {}, el("a", { href: `#q-${outcome.index + 1}` }, question.question)),
+						el("p", {}, outcome.answer === undefined ? "Not answered." : `Your answer: ${question.options[outcome.answer]}`),
+						el("p", {}, `Correct answer: ${question.options[question.correct]}`),
+						el("p", {}, question.explanation),
+						el("div", { class: "cites" }, "Sources:", question.cites.map(citeView)),
+					);
+				})),
+			),
+		);
+	}
+	box.replaceChildren(...children);
+	box.hidden = false;
+	box.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function retake() {
+	for (const entry of cards) {
+		entry.card.classList.remove("scored");
+		entry.feedback.hidden = true;
+		const order = entry.labels.map((_, value) => value);
+		for (let index = order.length - 1; index > 0; index--) {
+			const other = Math.floor(Math.random() * (index + 1));
+			[order[index], order[other]] = [order[other], order[index]];
+		}
+		entry.options.replaceChildren(...order.map((value) => entry.labels[value]));
+		for (const label of entry.labels) {
+			const input = label.querySelector("input");
+			input.checked = false;
+			input.disabled = false;
+			label.classList.remove("is-correct", "is-wrong");
+		}
+	}
+	document.getElementById("results").hidden = true;
+	document.getElementById("submit").hidden = false;
+	document.getElementById("retake").hidden = true;
+	progress();
+	document.getElementById("questions-title").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+header();
+commits();
+decisions();
+questions();
+progress();
+document.getElementById("submit").addEventListener("click", submit);
+document.getElementById("retake").addEventListener("click", retake);
+</script>
+</body>
+</html>

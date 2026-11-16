@@ -6,16 +6,16 @@ descriptions of model-invocable skills and reads a skill's file when a task matc
 
 ## Bundled skills
 
-Makora ships 63 skills in `apps/makora/skills`, generated from pinned upstream sources:
+Makora ships 64 skills in `apps/makora/skills`, generated from pinned upstream sources:
 
 | Group | Skills | Source |
 | --- | --- | --- |
 | pstack | `poteto-mode` and its playbooks, `how`, `why`, `interrogate`, `swarm`, `arena`, `architect`, `figure-it-out`, `show-me-your-work`, `teach`, `technical-writing`, … and 24 `principle-*` skills | `cursor/plugins` (pstack) |
 | Companions | `deslop`, `control-cli`, `control-ui`, `verify-this` | `cursor/plugins` (cursor-team-kit) |
 | no-mistakes | `no-mistakes` | `kunchenguid/no-mistakes` |
-| Makora overlays | `makora-adapter` (maps Cursor terms to makora), `create-skill` | `apps/makora/skills-src` |
+| Makora overlays | `makora-adapter` (maps Cursor terms to makora), `create-skill`, `session-quiz` (what `/quiz` runs; [quiz.md](quiz.md)) | `apps/makora/skills-src` |
 
-Most pstack skills are user-invoked only (`disable-model-invocation: true`); 7 of the 63 are offered to the model.
+Most pstack skills are user-invoked only (`disable-model-invocation: true`); 8 of the 64 are offered to the model.
 
 pstack was written for Cursor. Each pstack skill that uses a Cursor term starts with a line pointing to
 `makora-adapter`, which maps those terms to what makora has today: the `python` tool and its helpers (`await

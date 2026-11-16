@@ -32,7 +32,8 @@ npm start                      # TUI, new session in the current directory
 
 Data lives in `~/.makora` (`MAKORA_HOME` overrides it): `sessions/<id>/` per session (`session.sqlite`, REPL
 snapshot `blobs/`, kernel pid files), `python/venv` (the kernels' Python environment, built by the first cell),
-`auth.json`, `settings.json`, `keybindings.json`, and optional `AGENTS.md` and `skills/`.
+`auth.json`, `settings.json`, `keybindings.json`, `quizzes/` (pages from `/quiz`), and optional `AGENTS.md` and
+`skills/`.
 
 ## The REPL
 

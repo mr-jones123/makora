@@ -27,7 +27,8 @@ made, such as `↳ ✓ bash · echo hello; sleep 2 · 2.1s` ([repl.md](repl.md#c
 ### Notices
 
 Run failures, retries, aborts, compaction problems and session restores show as a warning box (`⚠ …`). Command output
-(for example `/accounts`) shows as a muted `·` line; those lines are not saved in the session.
+(for example `/accounts`) and news from the session (`Quiz saved · <path> · opened in browser`) show as a muted `·`
+line; those lines are not saved in the session.
 
 ### Subagent results and messages
 
@@ -115,6 +116,7 @@ Every binding can be remapped in `~/.makora/keybindings.json` ([reference/config
 | `/new` | Start a new session in this directory |
 | `/resume` | Resume another session |
 | `/fork` | Fork the active conversation before an earlier message, with that point's variables and files ([sessions.md](sessions.md#forks)) |
+| `/quiz [rev-range \| all]` | Have the agent write a 10-question quiz on what this session's commits built and decided (or the range's, or the whole project's), saved as a self-scoring HTML page and opened in the browser ([quiz.md](quiz.md)) |
 | `/compact [instructions]` | Compact the context now |
 | `/diff` | Open the diff view of the active conversation's directory: changes, staging, commit history, ask about a line ([diff.md](diff.md)) |
 | `/skill:<name> [args]` | Run a skill: its instructions plus your arguments become the message |

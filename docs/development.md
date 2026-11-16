@@ -56,6 +56,7 @@ The REPL tests need uv or Python too, because they build a real environment in t
 | `test/dashboard.test.ts` | The dashboard's rows (sections, indentation, glyphs, budget bars, the running cell) and inspector lines |
 | `test/git-writes.test.ts` | The per-repository git write queue across worktrees and repositories, and waiting for a lock another process holds |
 | `test/list-window.test.ts` | The dashboard list's window: a list that fits, the selection at the top, middle and bottom, section titles, scrolling up and down, a resize, and a screen too short for the markers |
+| `test/quiz.test.ts` | `/quiz` with the fake model and a real kernel in a temporary repo: the saved page's questions and diffs, the opener called once, the notice, a bad bank's errors back in the cell, and the ranges `/quiz` asks for. `test/quiz-bank.test.ts` and `test/quiz-page.test.ts` need no kernel ([architecture/quiz.md](architecture/quiz.md#tests)) |
 | `test/session-delete.test.ts` | `makora rm` on a session with a fork, a reviewer and two writers (one branch with work, one empty), after a cleaned temp folder took the review checkout, and the same cleanup when an ephemeral session closes |
 
 For TUI changes, check the real screen in tmux with `--fake` and a temporary `MAKORA_HOME`, at a wide size (140x40), a

@@ -25,7 +25,7 @@ when it fails, so a failed open never leaves a session locked. `close()` does th
 | Option | Value |
 | --- | --- |
 | `models` | `builtinModels({ credentials: authStore })` from pi-ai; in fake mode also the faux provider |
-| `registry` | Durable's `CodingTools` (`read`, `write`, `edit`, `bash`), the `makora` extension, the `makora-repl` extension (`python`, `llm`), and the `makora-agents` extension (`spawn`, `collect`, `send`, `merge`, `stop`, `remove`, `agents`, `wait_agents`, the anchor and cost-stop tasks, and two hooks; see [subagents.md](subagents.md#tools)) |
+| `registry` | Durable's `CodingTools` (`read`, `write`, `edit`, `bash`), the `makora` extension, the `makora-repl` extension (`python`, `llm`), and the `makora-agents` extension (`spawn`, `collect`, `send`, `merge`, `stop`, `remove`, `agents`, `wait_agents`, the anchor and cost-stop tasks, and two hooks; see [subagents.md](subagents.md#tools)), and the `makora-quiz` extension (`quiz_publish`; see [quiz.md](quiz.md)) |
 | `settings` | `retry: { maxRetries: 3 }`, `compaction: { enabled: true }`, `toolExecution: "parallel"` |
 | `env` | `({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? sessionCwd })` |
 | `identity` | Attribution `makora` |
@@ -82,6 +82,7 @@ warm.
 
 | Keyword | Cells |
 | --- | --- |
+| `<skill name="session-quiz"` | `print(await quiz.publish(json.load(open("quiz-bank.json"))))`, printing `quiz.publish refused:` and the error when makora refuses the bank ([quiz.md](quiz.md#tests)) |
 | `crash` | `import os; os._exit(1)` |
 | `scribble` | `await write("late.txt", "late\n")`, then `os._exit(1)` in the same cell |
 | `edit` | `print(await edit("notes.txt", "world", "there"))` |

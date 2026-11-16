@@ -45,6 +45,13 @@ export type FakeWait = { readonly wait: { readonly names: readonly string[]; rea
  * brief around the task picks nothing.
  */
 export const FAKE_SCRIPTS: readonly { readonly keyword: string; readonly cells: readonly (string | FakeWait)[] }[] = [
+	// `/quiz`: publishes the bank a test or demo wrote to quiz-bank.json, and prints what makora answered.
+	{
+		keyword: '<skill name="session-quiz"',
+		cells: [
+			'import json\ntry:\n    print(await quiz.publish(json.load(open("quiz-bank.json"))))\nexcept Exception as error:\n    print("quiz.publish refused:", error)',
+		],
+	},
 	{ keyword: "crash", cells: ["import os; os._exit(1)"] },
 	{ keyword: "scribble", cells: ['await write("late.txt", "late\\n")\nimport os; os._exit(1)'] },
 	{ keyword: "edit", cells: ['print(await edit("notes.txt", "world", "there"))'] },

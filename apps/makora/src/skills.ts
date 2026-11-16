@@ -87,6 +87,12 @@ export function renderSkills(skills: readonly Skill[]): string | undefined {
 	].join("\n");
 }
 
+/** The user message that runs `skill`: its instructions in a `<skill>` block, then `args` when there are any. */
+export function skillMessage(skill: Skill, args: string): string {
+	const body = `<skill name="${skill.name}" location="${skill.path}">\n${readSkillBody(skill)}\n</skill>`;
+	return args ? `${body}\n\n${args}` : body;
+}
+
 /** A skill's instructions: its SKILL.md without the frontmatter. */
 export function readSkillBody(skill: Skill): string {
 	return splitFrontmatter(readFileSync(skill.path, "utf8")).body.trim();

@@ -15,6 +15,7 @@ flowchart TB
     H --> EXT[makora extension: prompt sections]
     H --> AG[makora-agents extension: spawn, send, merge, wait_agents, anchors]
     AG --> WTS[worktrees.ts]
+    H --> QZ[makora-quiz extension: quiz_publish]
     H --> MODELS[pi-ai Models]
     REPL --> TOOLS[CodingTools: read, write, edit, bash]
     REPL --> KM[kernel/manager.ts]
@@ -80,6 +81,7 @@ a background service.
 | `project.ts` | Directories from cwd to the git root; the branch |
 | `tool-cell.ts`, `transcript-rows.ts` | Entries and live state turned into rows and one-line tool summaries, with a python cell's number and nested calls |
 | `print.ts` | Print mode |
+| `quiz/`, `open.ts` | The session quiz: the bank's checks, the page, the `quiz_publish` tool and `/quiz`'s range ([quiz.md](quiz.md)); the browser opener |
 | `auth/` | `types.ts` (contract), `store.ts`, `login.ts`, `usage.ts` |
 | `tui/` | See [tui.md](tui.md); the diff view is `tui/diff-*.ts`, the agents dashboard `tui/agents.ts`, `tui/dashboard.ts` and `tui/agent-actions.ts` |
 | `source.ts`, `source-resolver.ts` | Resolve `@earendil-works/*` imports to package sources so nothing needs building |
@@ -87,7 +89,8 @@ a background service.
 Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` (the kernel's Python package:
 `kernel.py`, `snapshot.py`, `helpers.py`, `protocol.py`), `scripts/sync-skills.mjs`, `scripts/tmux-agents.sh` and
 `scripts/tmux-dashboard.sh` and `scripts/tmux-dashboard-scroll.sh` (tmux checks of subagents and the dashboard),
-`scripts/tmux-pstack.sh` (tmux check of the `/pstack` picker), `skills/` (generated),
+`scripts/tmux-pstack.sh` (tmux check of the `/pstack` picker), `assets/quiz/template.html` (the quiz page),
+`skills/` (generated),
 `skills-src/` (overlays), `skills.lock.json`, `test/`.
 
 ## Files on disk
@@ -107,6 +110,7 @@ Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` 
     blobs/sha256/…              pickled REPL variables, one file per blob
     kernels/<conversation>.pid  pid of each running kernel
   worktrees/<repo>-<hash>/<session>/<conversation>/   a fork's or a write subagent's git worktree
+  quizzes/<repo>-<hash>/<YYYY-MM-DD>-<n>.html          a quiz page from /quiz
 <temp folder>/makora-worktrees/<repo>-<hash>/<session>/<conversation>/   a review subagent's checkout
 <project>/.git/
   refs/makora/<session>/<conversation>   commits of the worktree's tree after each cell

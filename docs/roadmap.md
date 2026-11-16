@@ -134,6 +134,24 @@ Open items of phase 3:
 | A live view of a running agent inside the dashboard | Key routing to a second scrolling area in pi-tui |
 | Kernel startup cost per subagent | A measurement with 4 children |
 
+## The session quiz (built)
+
+`/quiz` has the agent write 10 multiple-choice questions on what the session's commits built and decided, from the
+commits, their diffs, the docs and decisions they changed, and the transcript, through the bundled `session-quiz`
+skill. makora checks the bank, renders one self-contained HTML page with the commits' diffs, shuffles each question's
+options, saves it under `~/.makora/quizzes/` and opens it; the page scores itself, and nothing is recorded
+([features/quiz.md](features/quiz.md), [architecture/quiz.md](architecture/quiz.md)). Verified with the fake model in
+`test/quiz.test.ts`, unit tests of the checks, the shuffle and the escaping, and a real quiz on makora's own history in
+headless Chrome, light and dark, before and after submitting.
+
+Open items of the quiz:
+
+| Item | Needs |
+| --- | --- |
+| Quiz results are not kept: a score lives only in the page | The memory system, which decides what the owner's results feed into |
+| A page holds every diff of its range (2.4 MB for makora's 10 commits) | A cap per commit, if larger ranges make pages slow |
+| `/quiz all` leaves finding the project's first commit to the agent | A project setting, if the agent's choice proves unreliable |
+
 ## Later phases (planned)
 
 4. Long-running operation: a background service with one worker process per session, attach and detach, goals,
@@ -144,3 +162,8 @@ Open items of phase 3:
    package.
 7. Sandboxed execution environments (deferred: no design for macOS yet). Durable's `env` function is where they plug
    in.
+
+The memory system: the session, project and user memories of [vision.md](vision.md#what-evolves), and with it the wiki,
+a project's long-term record in the owner's Obsidian vault (intent, architecture, decisions as ADRs, progress) written
+from commits, docs and transcripts. The wiki is designed as part of the memory system, not before
+([decisions.md](decisions.md)); where the memory system falls among the phases above is open.

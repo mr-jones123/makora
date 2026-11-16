@@ -96,7 +96,7 @@ both together. `KERNEL_PROTOCOL_VERSION` is 1, and makora refuses a kernel whose
 | makora | `shutdown` | Exit |
 | kernel | `ready { protocol, pid, python, dill }` | First line, once requests are accepted; makora waits 30 s for it |
 | kernel | `stream { id, stream, text }` | Cell output, batched every 50 ms and flushed before each reply |
-| kernel | `host_request { requestId, cellId, method, params }` | A helper's call into makora: `tool`, `llm` or `ctx` |
+| kernel | `host_request { requestId, cellId, method, params }` | A helper's call into makora: `tool`, `llm`, `ctx`, `agents` or `quiz` |
 | kernel | `result { id, status, value?, error?, durationMs, maxRssBytes }` | How a cell ended: `ok`, `error` or `interrupted` |
 | kernel | `snapshot_result { id, manifest }` | The snapshot's manifest |
 | kernel | `restore_result { id, restored, failed }` | Names restored, and names that failed with the reason |
@@ -121,6 +121,7 @@ The helpers in a cell send `host_request` messages, and the `python` tool answer
 | `llm` | A nested call of the `llm` tool, keyed the same way |
 | `ctx` | `latestInput` or `recentEntries` in `history.ts`, read from the conversation's committed entries |
 | `agents` | One nested call of a subagent tool, keyed the same way: `spawn`, `collect`, `send`, `merge`, `stop` or `remove`, or the `agents` tool for `list`, `get` and `recent` ([subagents.md](subagents.md#tools)). The result is the tool's structured output |
+| `quiz` | `await quiz.publish(bank)`: one nested call of the `quiz_publish` tool, keyed the same way, which checks the bank, saves the quiz page and opens it ([quiz.md](quiz.md)). The result is `{ path, range, commits, opened }` |
 
 `await read(path)` with neither `offset` nor `limit` returns the whole file. Durable's `read` stops at its line and
 byte limits and says so only in a diagnostic, so the python tool follows the continuation offsets, one nested `read`

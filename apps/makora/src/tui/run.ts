@@ -486,8 +486,10 @@ class MakoraTui implements CommandHost {
 	async #adopt(session: MakoraSession): Promise<void> {
 		const root = new SessionFeed(session, session.root);
 		// Notices from opening the session head the root's transcript; later ones go to the active conversation.
-		for (const notice of session.notices) root.addLocal("notice", notice.message);
-		this.#unsubscribeNotices = session.onNotice((notice) => this.notice(notice.message));
+		for (const notice of session.notices) root.addLocal(notice.level === "info" ? "info" : "notice", notice.message);
+		this.#unsubscribeNotices = session.onNotice((notice) =>
+			notice.level === "info" ? this.info(notice.message) : this.notice(notice.message),
+		);
 		await root.start();
 		this.#feeds.set(session.root.id, root);
 		this.#show(root);

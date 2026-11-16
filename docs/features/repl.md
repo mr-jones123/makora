@@ -27,6 +27,7 @@ Every cell starts with these names defined. The async ones need `await`; top-lev
 | `ctx.input()` | The latest user message's text |
 | `await ctx.transcript(limit=20)` | The newest `limit` transcript messages, oldest first, as dicts with `id`, `kind`, `role` and `text`. Tool results add `toolName` and `isError`, and assistant messages add `toolCalls` |
 | `await spawn(...)`, `collect`, `send`, `merge`, `stop`, `remove`, `agents.list()`, `agents.get(name)`, `agents.recent(name)` | Subagents: see [subagents.md](subagents.md#start-one-from-a-cell) |
+| `await quiz.publish(bank)` | The `session-quiz` skill's hand-off: checks the question bank, saves the quiz page and opens it; returns `{path, range, commits, opened}`. See [quiz.md](quiz.md) |
 
 A failed call raises `HostError`. A `bash` command that exits with a non-zero code does not raise: check
 `.exit_code`.

@@ -9,9 +9,9 @@ How the bundled skills are generated, checked and kept current. What the user se
 | Path | What |
 | --- | --- |
 | `apps/makora/skills.lock.json` | Pinned sources (`cursor/plugins` commit and pstack version, `no-mistakes` tag and commit) and the sha256 of every source file read and every file generated |
-| `apps/makora/skills-src/` | Hand-written overlays: `makora-adapter/SKILL.md`, `create-skill/SKILL.md` |
+| `apps/makora/skills-src/` | Hand-written overlays: `makora-adapter/SKILL.md`, `create-skill/SKILL.md`, `session-quiz/SKILL.md` |
 | `apps/makora/scripts/sync-skills.mjs` | The generator (Node built-ins and `git` only) |
-| `apps/makora/skills/` | The generated tree: 63 skills and `LICENSES/{pstack,cursor-team-kit,no-mistakes}` |
+| `apps/makora/skills/` | The generated tree: 64 skills and `LICENSES/{pstack,cursor-team-kit,no-mistakes}` |
 | `node_modules/.cache/makora-skills/` | Upstream checkouts, reset before every build |
 
 ## What a build does

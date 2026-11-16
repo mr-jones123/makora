@@ -294,6 +294,11 @@ async function answerHost(
 			const [name, params] = AGENT_TOOLS[action](args);
 			return (await nestedTool(name, params, request.requestId, calls, api, context)).structuredOutput ?? "";
 		}
+		case "quiz":
+			return (
+				(await nestedTool("quiz_publish", request.params as JsonObject, request.requestId, calls, api, context))
+					.structuredOutput ?? ""
+			);
 	}
 }
 

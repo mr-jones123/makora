@@ -153,6 +153,13 @@ export async function commitFiles(repo: Repo, sha: string): Promise<DiffFile[]> 
 	);
 }
 
+/** The commits of `range` (any revision range `git log` takes), oldest first; throws when git cannot read it. */
+export async function rangeCommits(repo: Repo, range: string): Promise<Commit[]> {
+	return parseLog(
+		await git(repo.root, ["log", "--no-color", "--reverse", ...LOG_FORMAT, "--end-of-options", range, "--"]),
+	);
+}
+
 /** Stage the working-tree state of `file`. */
 export async function stage(repo: Repo, file: DiffFile): Promise<void> {
 	await git(repo.root, ["add", "--", file.path]);
