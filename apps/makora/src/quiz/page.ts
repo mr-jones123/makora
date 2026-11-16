@@ -11,7 +11,7 @@ import { type DiffRow, diffRows, findLine } from "./diff-rows.ts";
 export type PageRow = DiffRow | { readonly kind: "gap"; readonly hidden: number };
 
 /**
- * A note placed on the page: `row` indexes its file's `rows`, and `index` is its place in page order (commits oldest
+ * A note placed on the page: `row` indexes its file's `rows`, and `index` is its place in page order (commits newest
  * first, then files as listed, then rows), which is also what a `note` cite indexes.
  */
 export type PageNote = Omit<Note, "sha" | "path"> & { readonly index: number; readonly row: number };
@@ -72,13 +72,13 @@ export const NOTE_CONTEXT = 12;
 export const FOCUS_CONTEXT = 3;
 
 /**
- * The page for `content`: diffs capped per file, annotated files first, each note on its line (which is shown even
- * past the cap) and numbered in page order, and each question's options in a fresh random order.
+ * The page for `content`: commits newest first, diffs capped per file, annotated files first, each note on its line
+ * (which is shown even past the cap) and numbered in page order, and each question's options in a fresh random order.
  */
 export function buildPage(content: QuizContent, sources: PageSources): QuizPage {
 	const notes = content.notes.map((note, index) => ({ ...note, index }));
 	// Notes still carry their bank index here; page order is known only once every file is placed and sorted.
-	const placed = content.commits.map((commit) => {
+	const placed = content.commits.toReversed().map((commit) => {
 		const files = (sources.files.get(commit.sha) ?? []).map((file) =>
 			pageFile(
 				file,

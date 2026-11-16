@@ -63,7 +63,7 @@ sequenceDiagram
    an annotation is never hidden by the cap: makora renders that part of the hunk rather than refusing the annotation.
    Rows left out between shown ones become one `gap` row with their count; those after the last shown one are counted
    in `more`. Each note goes on its file with `row`, the index of its line among the shown rows. Annotated files are
-   listed first in each commit, and notes are numbered in page order (commits oldest first, files as listed, rows);
+   listed first in each commit, and notes are numbered in page order (commits newest first, files as listed, rows);
    `note` cites are renumbered to match, so `#note-N`, the index, the pill and `n`/`p` all count the same way. Each
    file also gets `focus`, the merged `[from, to]` row ranges of each note's row and 3 rows either side, which **Notes
    only** draws with a `⋯ N lines` marker for what lies between. Each question's options are shuffled with Fisher-Yates over `Math.random`, moving `correct` with the

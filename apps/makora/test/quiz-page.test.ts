@@ -162,7 +162,7 @@ describe("the page's diffs", () => {
 		assert.equal(placed!.index, 0);
 	});
 
-	it("numbers notes in page order, lists annotated files first, and points note cites at the new numbers", () => {
+	it("lists commits newest first, numbers notes in page order, lists annotated files first, and points note cites at the new numbers", () => {
 		const lines = (count: number): DiffLine[] =>
 			Array.from({ length: count }, (_, index) => ({ kind: "add", newNo: index + 1, text: `line ${index + 1}` }));
 		const second = {
@@ -178,16 +178,16 @@ describe("the page's diffs", () => {
 			comment: `${path}:${line}`,
 			cites,
 		});
-		// Bank order: the later commit first, rows out of order, and a note citing another by its bank index.
+		// Bank order: the older commit first, rows out of order, and a note citing another by its bank index.
 		const notes = [
-			note(second.sha, "c.ts", 2),
 			note(SHA, "b.ts", 9),
-			note(SHA, "b.ts", 3, [{ kind: "note", text: "c.ts:2", index: 0 }]),
+			note(SHA, "b.ts", 3, [{ kind: "note", text: "c.ts:2", index: 2 }]),
+			note(second.sha, "c.ts", 2),
 		];
 		const base = content("ordinary", notes);
 		const questions = base.questions.map((question) => ({
 			...question,
-			cites: [{ kind: "note" as const, text: "b.ts:9", index: 1 }],
+			cites: [{ kind: "note" as const, text: "b.ts:9", index: 0 }],
 		}));
 		const files = new Map([
 			[SHA, [textFile("a.ts", lines(5)), textFile("b.ts", lines(20))]],
@@ -199,18 +199,18 @@ describe("the page's diffs", () => {
 		);
 		assert.deepEqual(
 			page.commits.map((commit) => commit.files.map((file) => file.path)),
-			[["b.ts", "a.ts"], ["c.ts"]],
+			[["c.ts"], ["b.ts", "a.ts"]],
 		);
 		const walked = page.commits.flatMap((commit) =>
 			commit.files.flatMap((file) => file.notes.map((each) => [each.index, each.comment])),
 		);
 		assert.deepEqual(walked, [
-			[0, "b.ts:3"],
-			[1, "b.ts:9"],
-			[2, "c.ts:2"],
+			[0, "c.ts:2"],
+			[1, "b.ts:3"],
+			[2, "b.ts:9"],
 		]);
-		assert.deepEqual(page.commits[0]!.files[0]!.notes[0]!.cites, [{ kind: "note", text: "c.ts:2", index: 2 }]);
-		assert.deepEqual(page.questions[0]!.cites, [{ kind: "note", text: "b.ts:9", index: 1 }]);
+		assert.deepEqual(page.commits[1]!.files[0]!.notes[0]!.cites, [{ kind: "note", text: "c.ts:2", index: 0 }]);
+		assert.deepEqual(page.questions[0]!.cites, [{ kind: "note", text: "b.ts:9", index: 2 }]);
 	});
 
 	it("keeps exactly the annotated rows and FOCUS_CONTEXT rows either side for notes only, merged", () => {

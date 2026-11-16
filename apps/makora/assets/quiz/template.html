@@ -256,9 +256,10 @@ function header() {
 	document.getElementById("project").textContent = quiz.project;
 	const added = quiz.commits.reduce((sum, commit) => sum + commit.added, 0);
 	const removed = quiz.commits.reduce((sum, commit) => sum + commit.removed, 0);
-	const first = quiz.commits[0];
-	const last = quiz.commits[quiz.commits.length - 1];
-	const dates = first === undefined ? "" : day(first.date) === day(last.date) ? day(first.date) : `${day(first.date)} \u2013 ${day(last.date)}`;
+	// Commits are listed newest first.
+	const newest = quiz.commits[0];
+	const oldest = quiz.commits[quiz.commits.length - 1];
+	const dates = newest === undefined ? "" : day(oldest.date) === day(newest.date) ? day(newest.date) : `${day(oldest.date)} \u2013 ${day(newest.date)}`;
 	document.getElementById("meta").append(
 		el("span", {}, el("code", {}, quiz.range)),
 		el("span", {}, dates),

@@ -149,9 +149,10 @@ describe("/quiz with the fake model", () => {
 			assert.match(path, new RegExp(`^${join(where.home, "quizzes")}/repo-[0-9a-f]{8}/${day}-1\\.html$`));
 			const page = pageData(readFileSync(path, "utf8"));
 			assert.equal(page.project, "repo");
+			// Newest first: the docs commit, then the page commit.
 			assert.deepEqual(
 				page.commits.map((each) => [each.sha, each.summary]),
-				where.session.map((sha) => [sha, bank(where).summaries[sha.slice(0, 8)]]),
+				where.session.toReversed().map((sha) => [sha, bank(where).summaries[sha.slice(0, 8)]]),
 			);
 			assert.deepEqual(
 				page.questions.map((question) => question.question).sort(),
@@ -163,10 +164,10 @@ describe("/quiz with the fake model", () => {
 				assert.match(question.options[question.correct]!, /^Users read it first/);
 				assert.deepEqual(question.cites.slice(1), [
 					{ kind: "decision", text: "Usage in the README", index: 0 },
-					{ kind: "note", text: "README.md:3", index: 1 },
+					{ kind: "note", text: "README.md:3", index: 0 },
 				]);
 			}
-			const htmlFile = page.commits[0]!.files.find((file) => file.path === "page.html")!;
+			const htmlFile = page.commits[1]!.files.find((file) => file.path === "page.html")!;
 			assert.deepEqual(htmlFile.rows, [
 				{ kind: "hunk", text: "@@ -0,0 +1,2 @@" },
 				{ kind: "add", newNo: 1, text: "<p>before</p>" },
@@ -174,9 +175,9 @@ describe("/quiz with the fake model", () => {
 			]);
 			assert.deepEqual(
 				htmlFile.notes.map((note) => [note.index, htmlFile.rows[note.row], note.comment]),
-				[[0, htmlFile.rows[2], bank(where).annotations[0]!.comment]],
+				[[1, htmlFile.rows[2], bank(where).annotations[0]!.comment]],
 			);
-			const readme = page.commits[1]!.files.find((file) => file.path === "README.md")!;
+			const readme = page.commits[0]!.files.find((file) => file.path === "README.md")!;
 			assert.deepEqual(readme.rows[readme.notes[0]!.row], { kind: "add", newNo: 3, text: "usage: run it" });
 			const saved = session.notices.filter((notice) => notice.level === "info").map((notice) => notice.message);
 			assert.equal(saved.length, 1);

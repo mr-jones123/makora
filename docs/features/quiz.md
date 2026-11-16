@@ -65,7 +65,7 @@ One scroll page, readable at 900 px and on a phone, light or dark with the syste
 - **Notes.** A collapsed index under the header, titled with the count (`Notes 45 notes`). Opened, it lists every
   comment grouped by commit (short sha and subject), then by file, each entry with its `file:line` and the first line
   of the comment. Clicking an entry opens the commit and the file and jumps straight to the comment.
-- **What changed.** One row per commit, oldest first: short sha, subject, the agent's summary, its stat and a
+- **What changed.** One row per commit, newest first: short sha, subject, the agent's summary, its stat and a
   `N notes` badge. Clicking a row lists its files, annotated ones first and already open, each with its own `N notes`
   badge; every file opens to its diff, colored, with old and new line numbers, at most 300 lines and a `truncated, N
   more lines` note after them. An annotated line past those 300 is still shown, with 12 lines either side and `⋯ N
@@ -87,7 +87,7 @@ One scroll page, readable at 900 px and on a phone, light or dark with the syste
 
 ### Getting to the comments without scrolling
 
-Comments are numbered in page order: by commit, oldest first, then by file as listed, then by line. Besides the index
+Comments are numbered in page order: by commit, newest first, then by file as listed, then by line. Besides the index
 and **Notes only**:
 
 - **The note pill.** Bottom right, once the page has comments: `◀ note 3 / 45 ▶`, or the count before the first jump.
