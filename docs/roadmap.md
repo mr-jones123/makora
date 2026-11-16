@@ -71,8 +71,6 @@ Open items of forks:
 | Item | Needs |
 | --- | --- |
 | Merging a fork's files back | `merge` takes a write subagent's branch; a fork's worktree is detached and has none |
-| Deleting a session's fork worktrees and refs with the session | Session deletion |
-| An ephemeral session's fork worktrees stay after it ends | A decision: remove them on exit, or keep them as the session's file output |
 
 ## The diff view (built)
 
@@ -97,12 +95,18 @@ Delivered in `apps/makora`, verified with the fake model in `test/agents.test.ts
 
 - `spawn` from a cell: a `review` child in a checkout detached at a ref, or a `write` child on its own branch, each
   with its own kernel, its own model when given, and a budget in turns, USD and minutes. At most 4 run at once; more
-  queue. A child may spawn children once.
+  queue, a child woken by a message or typed input included, and every run gets its whole time limit. A child may spawn
+  children once.
 - `wait_agents` for the model and `collect` in a cell, parked in Durable without holding a process; results reported
   as `<agent_result>` to a parent that is not waiting.
 - `send` between a parent, siblings and children, with length, inbox and rate limits; a message wakes a finished child.
+- makora's git writes (commits, merges, worktree adds and removes, branch deletes) take turns per repository, and a
+  lock another git process holds is waited for.
 - `merge` with `--no-ff`, conflicts returned as paths with the tree left clean, refused during the user's own merge or
   rebase; `stop`; `remove` with the children and worktrees, keeping an unmerged branch with all its work.
+- `makora rm <id>` deletes a session after a confirmation, and an ephemeral session cleans up as it ends: every fork
+  and subagent worktree, the write branches without work, `refs/makora/<session>/` and the session's folders; a write
+  branch with work stays ([features/sessions.md](features/sessions.md#deleting-a-session)).
 - Crash safety: a killed session resumes its children without running anything twice, and a deleted review checkout
   comes back.
 - The project's `worktreeSetup` command in new worktrees, once the user approved it, without provider credentials and
@@ -110,7 +114,8 @@ Delivered in `apps/makora`, verified with the fake model in `test/agents.test.ts
   configurable.
 - The agents dashboard (layout A): sections RUNNING, WAITING ON YOU and DONE, rows with budget bars and the running
   cell, an inspector, and `d` diff against the base commit, `m` merge, `s` stop, `x` remove, Enter to open an agent and
-  type to it.
+  type to it. The list scrolls with `↑ N more` / `↓ N more` markers when the agents do not fit
+  (`scripts/tmux-dashboard-scroll.sh`).
 - The preamble and the skills adapter: `Task` maps to `spawn`, read-only seats to `review` children, cloud agents to
   `write` children.
 
@@ -118,13 +123,10 @@ Open items of phase 3:
 
 | Item | Needs |
 | --- | --- |
-| A run woken by a message or by user input takes no running slot and has no time limit | An owner decision ([decisions.md](decisions.md)) |
 | Re-adding a missing worktree does not rerun the setup command | Rerun it, or record that it ran in the worktree |
 | The cost limit is checked after each tool round, so one long response can pass it | Usage during a generation |
 | pstack model roles as a makora setting | A setting per role, read by the adapter |
 | `interrogate` and `swarm` with real subagents | A run on a real model |
-| Deleting a session's worktrees and branches with the session | Session deletion |
-| The dashboard list does not scroll; agents past the screen's height are cut off | Scrolling in the list |
 | A live view of a running agent inside the dashboard | Key routing to a second scrolling area in pi-tui |
 | Kernel startup cost per subagent | A measurement with 4 children |
 

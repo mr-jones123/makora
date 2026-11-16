@@ -13,6 +13,8 @@ export type SessionChoice =
 export type CliCommand =
 	| { readonly kind: "help" }
 	| { readonly kind: "list" }
+	/** Delete a stored session with its worktrees. */
+	| { readonly kind: "remove"; readonly id: string }
 	| {
 			readonly kind: "run";
 			readonly session: SessionChoice;
@@ -31,6 +33,7 @@ export const USAGE = `Usage:
   makora --continue            latest session of this directory
   makora --resume [id]         resume a session (pick one when no id)
   makora ls                    list sessions
+  makora rm <id>               delete a session, its worktrees, and its branches without work
   makora -p "<prompt>"         print mode: answer one prompt and exit
 
 Options:
@@ -56,6 +59,10 @@ export function parseCli(argv: readonly string[], fakeEnv: string | undefined): 
 				return index === 0 && argv.length === 1
 					? { kind: "list" }
 					: { kind: "error", message: "`ls` takes no options" };
+			case "rm":
+				return index === 0 && argv.length === 2 && !argv[1]!.startsWith("-")
+					? { kind: "remove", id: argv[1]! }
+					: { kind: "error", message: "`rm` takes one session id" };
 			case "-c":
 			case "--continue":
 				session = { kind: "continue" };

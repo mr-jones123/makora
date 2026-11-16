@@ -1,5 +1,6 @@
 // Makora's git worktrees: where a conversation's own checkout lives outside the repository, and how it is added and
-// removed. Forks and subagents both use them.
+// removed. Forks and subagents both use them. Adding and removing are git writes: callers run them inside the session's
+// `GitWrites` queue for the repository.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";

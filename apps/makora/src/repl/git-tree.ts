@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { copyFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -62,8 +63,38 @@ export const MAKORA_AUTHOR = {
 	GIT_COMMITTER_EMAIL: "makora@localhost",
 };
 
-/** Run git in `cwd` without a shell; its trimmed stdout. */
+/**
+ * Run git in `cwd` without a shell; its trimmed stdout. A lock file another git process holds (`index.lock`, a ref's
+ * `.lock`) is waited for a few times with a growing pause; one still held after that fails the call with its path.
+ */
 export async function git(cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<string> {
-	const { stdout } = await run("git", [...args], { cwd, env: env ?? process.env, maxBuffer: 64 * 1024 * 1024 });
-	return stdout.trim();
+	for (let attempt = 0; ; attempt++) {
+		try {
+			const { stdout } = await run("git", [...args], { cwd, env: env ?? process.env, maxBuffer: 64 * 1024 * 1024 });
+			return stdout.trim();
+		} catch (error) {
+			const lock = heldLock(error);
+			if (lock === undefined) throw error;
+			const pause = LOCK_PAUSES_MS[attempt];
+			if (pause === undefined) {
+				const waited = LOCK_PAUSES_MS.reduce((sum, each) => sum + each, 0) / 1000;
+				throw new Error(
+					`git ${args.join(" ")} in ${cwd}: ${lock} is held by another git process; makora waited ${waited} s for it. If no git command is running there, delete that file.`,
+					{ cause: error },
+				);
+			}
+			await sleep(pause);
+		}
+	}
+}
+
+// About 3 s in all: a commit or checkout another process runs takes that long at most; a lock still held after is
+// probably stale, which the error says how to clear.
+const LOCK_PAUSES_MS = [50, 100, 200, 400, 800, 1600];
+
+/** The lock file git refused to create because it exists, from a failed git call's stderr. */
+function heldLock(error: unknown): string | undefined {
+	// A failed `execFile` carries the child's stderr: output of another program, the trust boundary here.
+	const stderr = error instanceof Error && "stderr" in error ? String(error.stderr) : "";
+	return /Unable to create '([^']+\.lock)': File exists/.exec(stderr)?.[1];
 }

@@ -42,6 +42,7 @@ environment, which needs [uv](https://docs.astral.sh/uv/), or `python3` 3.11 or 
 | `makora --continue` | Latest session of the current directory |
 | `makora --resume` | Pick a session |
 | `makora ls` | List sessions |
+| `makora rm <id>` | Delete a session and its worktrees, after saying what goes and which branches stay |
 | `makora -p "explain this repo"` | Print mode: answer on stdout, no TUI |
 | `makora --ephemeral` | A session kept in memory only: nothing saved, nothing to resume |
 

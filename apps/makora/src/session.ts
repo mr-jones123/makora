@@ -1,6 +1,6 @@
 // One open session: its lock, its Durable harness over `session.sqlite` (or memory, when ephemeral), its root
-// conversation, and the Python kernels of its conversations.
-import { tmpdir } from "node:os";
+// conversation, the Python kernels of its conversations, and its git writes. An ephemeral session removes its worktrees
+// when it closes.
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
 import { uuidv7 } from "@earendil-works/pi-ai";
@@ -20,11 +20,13 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { type Agents, createAgents } from "./agents/extension.ts";
 import { admitInput, identityOf } from "./agents/family.ts";
 import type { SetupPolicy, SetupRequest } from "./agents/worktree.ts";
-import { defaultModel, type MakoraApp } from "./app.ts";
+import { agentRoots, defaultModel, type MakoraApp, worktreeRoots } from "./app.ts";
 import { makoraExtension } from "./extension.ts";
+import { GitWrites } from "./git/writes.ts";
 import { KernelManager } from "./kernel/manager.ts";
 import { createRepl, type Repl } from "./repl/extension.ts";
 import type { SnapshotPolicy } from "./repl/python-tool.ts";
+import { applyCleanup, planCleanup, sessionWorktrees } from "./session-delete.ts";
 import {
 	lockSession,
 	type SessionLock,
@@ -48,18 +50,24 @@ export interface MakoraSession {
 	readonly meta: SessionMeta;
 	/** The Python kernels of the session's conversations. */
 	readonly kernels: KernelManager;
+	/** The session's git writes (commits, merges, worktrees, branch deletes), one at a time per repository. */
+	readonly git: GitWrites;
 	/** Notices so far, oldest first. */
 	readonly notices: readonly SessionNotice[];
 	/** Call `listener` with each later notice; returns the unsubscribe. */
 	onNotice(listener: (notice: SessionNotice) => void): () => void;
 	/**
-	 * Submit user input to `conversation`; the session's first input becomes its title. A subagent takes it as a steer
-	 * while it runs and is woken by it once finished, so its anchor records the run; a queued or removed one refuses it.
+	 * Submit user input to `conversation`; the session's first input becomes its title. Returns the input's submission. A
+	 * running subagent takes it as a steer. A finished one is woken by it: it queues for a running slot, and its anchor
+	 * submits the input once it has one and records the run, so this returns undefined. A queued or removed one refuses it.
 	 */
-	submit(conversation: Conversation, text: string, context: Context): Promise<Submission>;
+	submit(conversation: Conversation, text: string, context: Context): Promise<Submission | undefined>;
 	/** Switch `conversation`'s model; the root's is recorded in the meta. */
 	setModel(conversation: Conversation, model: ModelRef, context: Context): Promise<void>;
-	/** Close the harness, stop the kernels, and release the lock. */
+	/**
+	 * Close the harness, stop the kernels, and release the lock. An ephemeral session then removes its worktrees, refs and
+	 * the write branches without work, as `makora rm` does for a stored one.
+	 */
 	close(): Promise<void>;
 }
 
@@ -122,6 +130,7 @@ async function open(
 		for (const listener of listeners) listener(notice);
 	};
 	const dir = store.kind === "persistent" ? sessionDir(store.sessionsDir, meta.id) : undefined;
+	const gitWrites = new GitWrites();
 	let kernels: KernelManager;
 	let repl: Repl;
 	let agents: Agents;
@@ -136,12 +145,10 @@ async function open(
 		registry.install(repl.extension);
 		agents = createAgents({
 			kernels,
+			git: gitWrites,
 			sessionId: meta.id,
 			defaultCwd: meta.cwd,
-			roots: () => ({
-				review: app.settings.worktrees.review ?? join(tmpdir(), "makora-worktrees"),
-				write: app.settings.worktrees.write ?? app.paths.worktrees,
-			}),
+			roots: () => agentRoots(app),
 			maxRunning: () => app.settings.maxRunningAgents,
 			setup: setupPolicy(app, options),
 			settingsFile: app.paths.settings,
@@ -215,6 +222,7 @@ async function open(
 			return current;
 		},
 		kernels,
+		git: gitWrites,
 		notices,
 		onNotice(listener) {
 			listeners.add(listener);
@@ -222,24 +230,25 @@ async function open(
 		},
 		async submit(conversation, text, submitContext) {
 			const self = await identityOf(harness, conversation.id, submitContext);
-			// A subagent's input is admitted under its anchor's round, so the run it starts is watched and recorded.
-			const submission =
-				self === undefined
-					? await conversation.submit({ type: "input", content: text }, submitContext)
-					: await harness.submission(
-							await harness.commit(
-								(tx) =>
-									admitInput(
-										tx,
-										{ handle: conversation, self },
-										{ content: text, requestId: `user-input:${uuidv7()}`, from: "user" },
-										"followUp",
-									),
-								submitContext,
-							),
-							submitContext,
-						);
-			if (submission === undefined) throw new Error(`The input to ${self?.name} was not admitted`);
+			let submission: Submission | undefined;
+			if (self === undefined)
+				submission = await conversation.submit({ type: "input", content: text }, submitContext);
+			else {
+				// A subagent's input is admitted through its anchor, so the run it starts is watched and recorded.
+				const id = await harness.commit(
+					(tx) =>
+						admitInput(
+							tx,
+							{ handle: conversation, self },
+							{ content: text, requestId: `user-input:${uuidv7()}`, from: "user" },
+							"followUp",
+						),
+					submitContext,
+				);
+				submission = id === undefined ? undefined : await harness.submission(id, submitContext);
+				if (id !== undefined && submission === undefined)
+					throw new Error(`The input to ${self.name} was not admitted`);
+			}
 			const title = current.title ?? (text.trim().split("\n")[0]?.slice(0, TITLE_LENGTH) || undefined);
 			current = update(current, title === undefined ? {} : { title });
 			return submission;
@@ -249,11 +258,18 @@ async function open(
 			if (conversation.id === root.id) current = update(current, { model: `${next.provider}/${next.modelId}` });
 		},
 		async close() {
+			// An ephemeral session leaves nothing behind but a write branch with work; its records are read before its
+			// storage goes with the harness.
+			const worktrees =
+				store.kind === "ephemeral" ? await sessionWorktrees(harness, meta.cwd, BACKGROUND_CONTEXT) : undefined;
 			try {
 				await harness.close(BACKGROUND_CONTEXT);
 			} finally {
 				await kernels.close();
 				lock?.release();
+			}
+			if (worktrees !== undefined) {
+				await applyCleanup(await planCleanup(worktrees, meta.cwd, meta.id, worktreeRoots(app)), gitWrites);
 			}
 		},
 	};

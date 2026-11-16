@@ -79,7 +79,7 @@ export async function mergeRow(host: ActionHost, row: DashboardRow): Promise<Act
 	const { files, added, removed } = state.result.diffStat;
 	const title = `Merge ${name} (${files} ${files === 1 ? "file" : "files"}, +${added} −${removed}) into ${short(cwd)}?`;
 	if (!(await host.confirm(title, `Merge ${name}`))) return CANCELLED;
-	const outcome = await mergeAgent(controlApi(host.session), record, cwd, context);
+	const outcome = await mergeAgent(controlApi(host.session), record, cwd, host.session.git, context);
 	return noted(
 		"conflicts" in outcome
 			? `${name} conflicts in ${outcome.conflicts.join(", ")}; the merge was aborted and nothing changed.`
@@ -135,7 +135,7 @@ export async function removeRow(
 			const also = below.length === 0 ? "" : ` Its children go too: ${below.map((each) => each.name).join(", ")}.`;
 			if (!(await host.confirm(`Remove ${name}?`, `Remove ${name}`, `${deletes(record)}${also}`))) return CANCELLED;
 			const cause = { reason: "user", detail: "removed from the dashboard" } as const;
-			const names = await removeAgent(controlApi(host.session), record, cause, host.session.kernels, context);
+			const names = await removeAgent(controlApi(host.session), record, cause, host.session, context);
 			return {
 				note: `Removed ${names.join(", ")}.`,
 				removed: [conversationId, ...below.map((each) => each.conversationId)],

@@ -132,7 +132,7 @@ function pidFile(pidDir: string, conversationId: ConversationId): string {
 }
 
 /** Kill every kernel recorded in `pidDir` that still runs, and forget the records. */
-function reapKernels(pidDir: string): void {
+export function reapKernels(pidDir: string): void {
 	let names: string[];
 	try {
 		names = readdirSync(pidDir);

@@ -1,6 +1,9 @@
 // The process-wide parts of makora shared by every session it opens: home paths, accounts, models, and settings.
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { MutableModels } from "@earendil-works/pi-ai/models";
 import type { ModelRef } from "@earendil-works/pi-durable";
+import type { WorktreeRoots } from "./agents/worktree.ts";
 import { openAuthStore } from "./auth/store.ts";
 import type { AuthStore } from "./auth/types.ts";
 import { createMakoraModels, FAKE_MODEL } from "./models.ts";
@@ -21,6 +24,20 @@ export function openApp(home: string, fake: boolean): MakoraApp {
 	const paths = homePaths(home);
 	const auth = openAuthStore(paths.auth);
 	return { paths, auth, models: createMakoraModels(auth, fake), settings: openSettings(paths.settings), fake };
+}
+
+/** Where subagent worktrees go, read from the settings at each call: the temp folder and `<home>/worktrees` by default. */
+export function agentRoots(app: MakoraApp): WorktreeRoots {
+	return {
+		review: app.settings.worktrees.review ?? join(tmpdir(), "makora-worktrees"),
+		write: app.settings.worktrees.write ?? app.paths.worktrees,
+	};
+}
+
+/** Every folder makora puts worktrees under: the subagent roots, and `<home>/worktrees` for forks. */
+export function worktreeRoots(app: MakoraApp): string[] {
+	const { review, write } = agentRoots(app);
+	return [...new Set([review, write, app.paths.worktrees])];
 }
 
 /**

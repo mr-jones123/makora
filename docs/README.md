@@ -11,7 +11,7 @@ fix one of them in the same change.
 | --- | --- | --- |
 | 1 | App skeleton: CLI, Durable sessions, TUI, Claude subscription login with accounts, bundled pstack and no-mistakes with a sync CI job | **Built**, committed on `main`, not pushed |
 | 2 | Persistent Python REPL as the model's one tool: file and shell helpers, `llm`, `ctx`, per-cell snapshots, `--ephemeral`; plus the `/diff` view | **Built**, with `/fork`; open: pruning |
-| 3 | Subagents, each with its own worktree and REPL; `wait_agents`; the agents dashboard | **Built**, not committed; open: model roles, session deletion |
+| 3 | Subagents, each with its own worktree and REPL; `wait_agents`; the agents dashboard | **Built**, not committed; open: model roles |
 | 4+ | Background service, autonomous mode, evals against Prime Agent, self-evolution, sandboxes | Planned |
 
 Details and open items: [roadmap.md](roadmap.md).

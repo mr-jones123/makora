@@ -62,7 +62,8 @@ a background service.
 | `app.ts` | Process-wide state: home paths, auth store, models, settings |
 | `paths.ts` | `~/.makora` and the files under it; `MAKORA_HOME` |
 | `sessions.ts` | Session directories, `meta.json`, the session list, the writer lock |
-| `session.ts` | One open session, stored or ephemeral: lock, kernels, `Harness.open`, root conversation, resume, restore notices |
+| `session-delete.ts` | Deleting a session's worktrees, write branches without work, refs and folders: `makora rm` and an ephemeral session's close |
+| `session.ts` | One open session, stored or ephemeral: lock, kernels, the git write queue, `Harness.open`, root conversation, resume, restore notices |
 | `fork.ts` | Forks: the `makora.fork` document, fork points, creating a fork with its worktree, listing and removing forks; see [forks.md](forks.md) |
 | `worktrees.ts` | The git worktrees forks and subagents share: the repository's directory name, the path, adding and removing |
 | `agents/` | Subagents: `types.ts` (the record contract), `docs.ts` (documents and signals), `spawn.ts`, `anchor.ts` (the task that drives one child), `worktree.ts` (placement, setup command, committing a write child's work), `control.ts` (merge, stop, remove), `wait.ts` (`wait_agents`, `collect`), `messaging.ts` (`send`), `family.ts` (identity, family, admitting an input), `read.ts` (`agents.*`), `prompts.ts` (the brief, `<agent_result>`, `<agent_message>`), `budget.ts` (the cost stop), `extension.ts` (the `makora-agents` extension); see [subagents.md](subagents.md) |
@@ -72,7 +73,7 @@ a background service.
 | `extension.ts` | The `makora` Durable extension: the REPL and subagents preamble, cwd, context files, skills |
 | `kernel/` | `python-env.ts` (the shared venv), `protocol.ts` (the kernel wire protocol), `kernel.ts` (one kernel process), `manager.ts` (kernels per conversation, status, pid files); see [repl.md](repl.md) |
 | `repl/` | `python-tool.ts`, `llm-tool.ts`, `history.ts`, `git-tree.ts`, `details.ts`, `extension.ts` (the `makora-repl` extension); see [repl.md](repl.md) |
-| `git/` | `repo.ts` (runs git), `diff.ts` (the diff parser), `log.ts` (the log parser) for the diff view; see [tui.md](tui.md#the-diff-view) |
+| `git/` | `repo.ts` (runs git), `diff.ts` (the diff parser), `log.ts` (the log parser) for the diff view, see [tui.md](tui.md#the-diff-view); `writes.ts` (makora's git writes, one at a time per repository, see [subagents.md](subagents.md#worktrees-and-roots)) |
 | `context-files.ts` | AGENTS.md discovery |
 | `skills.ts` | Skill discovery, precedence, hidden copies, the prompt section |
 | `project.ts` | Directories from cwd to the git root; the branch |
@@ -84,7 +85,7 @@ a background service.
 
 Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` (the kernel's Python package:
 `kernel.py`, `snapshot.py`, `helpers.py`, `protocol.py`), `scripts/sync-skills.mjs`, `scripts/tmux-agents.sh` and
-`scripts/tmux-dashboard.sh` (tmux checks of subagents and the dashboard), `skills/` (generated),
+`scripts/tmux-dashboard.sh` and `scripts/tmux-dashboard-scroll.sh` (tmux checks of subagents and the dashboard), `skills/` (generated),
 `skills-src/` (overlays), `skills.lock.json`, `test/`.
 
 ## Files on disk
@@ -113,7 +114,9 @@ Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` 
 ```
 
 An `--ephemeral` session writes none of `sessions/<id>/` and no refs; it still uses `python/venv/`, and a fork it makes
-gets a worktree at `HEAD` ([repl.md](repl.md#durability-is-optional), [forks.md](forks.md)).
+gets a worktree at `HEAD` ([repl.md](repl.md#durability-is-optional), [forks.md](forks.md)). Its worktrees, and its
+write branches without work, are removed when it ends. `makora rm <id>` does the same for a stored session and deletes
+`sessions/<id>/` and `refs/makora/<id>/` ([features/sessions.md](../features/sessions.md#deleting-a-session)).
 
 ## Changes outside apps/makora
 

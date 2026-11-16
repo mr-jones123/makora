@@ -153,8 +153,11 @@ export async function ensureForkFiles(session: MakoraSession, fork: Fork): Promi
 	const { files } = fork.record;
 	if (files.kind === "shared" || existsSync(files.path)) return;
 	const repo = session.meta.cwd;
-	if (files.kind === "snapshot") await git(repo, ["update-ref", forkRef(session, fork.conversationId), files.commit]);
-	await addWorktree(repo, files.path, { kind: "detached", commit: files.commit });
+	await session.git.run(repo, async () => {
+		if (files.kind === "snapshot")
+			await git(repo, ["update-ref", forkRef(session, fork.conversationId), files.commit]);
+		await addWorktree(repo, files.path, { kind: "detached", commit: files.commit });
+	});
 }
 
 /** Whether the fork's worktree has changes against the commit it started at, untracked files included. */
@@ -174,8 +177,10 @@ export async function removeFork(session: MakoraSession, fork: Fork, context: Co
 	await session.kernels.stop(id);
 	const { files } = fork.record;
 	const repo = session.meta.cwd;
-	if (files.kind !== "shared") await removeWorktree(repo, files.path);
-	if (files.kind === "snapshot") await git(repo, ["update-ref", "-d", forkRef(session, id)]);
+	await session.git.run(repo, async () => {
+		if (files.kind !== "shared") await removeWorktree(repo, files.path);
+		if (files.kind === "snapshot") await git(repo, ["update-ref", "-d", forkRef(session, id)]);
+	});
 	await markRemoved(session.harness, fork, context);
 }
 

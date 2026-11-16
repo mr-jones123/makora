@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import type { GitWrites } from "../git/writes.ts";
 import { git, MAKORA_AUTHOR } from "../repl/git-tree.ts";
 import { addWorktree, findRepo, type RepoPlace, removeWorktree, worktreePath } from "../worktrees.ts";
 import type { AgentMode, AgentRecord, AgentResult, AgentWorktree } from "./types.ts";
@@ -68,14 +69,16 @@ export function locateAgent(
  * checkout in a cleaned temp folder) before its next cell. A review checkout comes back at the same commit, a write
  * worktree on its branch. Returns whether it was added now.
  */
-export async function ensureAgentWorktree(worktree: AgentWorktree): Promise<boolean> {
+export async function ensureAgentWorktree(worktree: AgentWorktree, writes: GitWrites): Promise<boolean> {
 	if (worktree.kind === "shared" || existsSync(worktree.root)) return false;
-	await addWorktree(
-		worktree.repository,
-		worktree.root,
-		worktree.branch === undefined
-			? { kind: "detached", commit: worktree.baseCommit }
-			: { kind: "branch", branch: worktree.branch, base: worktree.baseCommit },
+	await writes.run(worktree.repository, () =>
+		addWorktree(
+			worktree.repository,
+			worktree.root,
+			worktree.branch === undefined
+				? { kind: "detached", commit: worktree.baseCommit }
+				: { kind: "branch", branch: worktree.branch, base: worktree.baseCommit },
+		),
 	);
 	// The parent's folder may be one git does not track, such as an empty or ignored one.
 	mkdirSync(worktree.cwd, { recursive: true });
@@ -114,11 +117,12 @@ const STOPPED = { kind: "failed", detail: "worktree setup was stopped", output: 
 export async function prepareAgent(
 	worktree: AgentWorktree,
 	policy: SetupPolicy,
+	writes: GitWrites,
 	signal: AbortSignal,
 ): Promise<Preparation> {
 	if (worktree.kind === "shared") return READY;
 	try {
-		await ensureAgentWorktree(worktree);
+		await ensureAgentWorktree(worktree, writes);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return { kind: "failed", detail: `could not add its worktree: ${message}`, output: message };
@@ -241,19 +245,22 @@ function setupEnv(): NodeJS.ProcessEnv {
  * What a finished child hands back. A write child's uncommitted changes are committed to its branch first, so a rerun
  * after a crash finds nothing left to commit and returns the same head.
  */
-export async function finishedResult(record: AgentRecord, summary: string): Promise<AgentResult> {
+export async function finishedResult(record: AgentRecord, summary: string, writes: GitWrites): Promise<AgentResult> {
 	const { worktree } = record;
 	if (worktree.kind === "shared") return { mode: "shared", summary };
 	if (record.mode === "review") return { mode: "review", summary };
 	const title = summary.split("\n").find((line) => line.trim() !== "") ?? "work";
-	await commitWork(record, `${record.name}: ${title.slice(0, 72)}`, summary);
-	const headCommit = await git(worktree.root, ["rev-parse", "HEAD"]);
-	return {
-		mode: "write",
-		summary,
-		headCommit,
-		diffStat: await diffStat(worktree.root, worktree.baseCommit, headCommit),
-	};
+	// One queued write from the commit to the diff stat, so a removal cannot take the worktree away in between.
+	return writes.run(worktree.root, async () => {
+		await commitUncommitted(record, `${record.name}: ${title.slice(0, 72)}`, summary);
+		const headCommit = await git(worktree.root, ["rev-parse", "HEAD"]);
+		return {
+			mode: "write",
+			summary,
+			headCommit,
+			diffStat: await diffStat(worktree.root, worktree.baseCommit, headCommit),
+		};
+	});
 }
 
 /**
@@ -261,7 +268,14 @@ export async function finishedResult(record: AgentRecord, summary: string): Prom
  * are skipped: a failing hook or a signing key waiting for a passphrase must not lose or hold up the child's work.
  * Does nothing for a review child, a clean tree, or a worktree that is not on disk.
  */
-export async function commitWork(record: AgentRecord, title: string, body: string): Promise<void> {
+export async function commitWork(record: AgentRecord, title: string, body: string, writes: GitWrites): Promise<void> {
+	const { worktree } = record;
+	if (record.mode !== "write" || worktree.kind !== "worktree") return;
+	await writes.run(worktree.root, () => commitUncommitted(record, title, body));
+}
+
+/** `commitWork` inside a queued write. */
+async function commitUncommitted(record: AgentRecord, title: string, body: string): Promise<void> {
 	const { worktree } = record;
 	if (record.mode !== "write" || worktree.kind !== "worktree" || !existsSync(worktree.root)) return;
 	const top = worktree.root;
@@ -294,12 +308,14 @@ async function diffStat(
  * Delete the child's worktree. A merged write child's branch goes too; an unmerged one is kept, with what the child left
  * uncommitted committed to it first. Converges.
  */
-export async function removeAgentWorktree(record: AgentRecord, merged: boolean): Promise<void> {
+export async function removeAgentWorktree(record: AgentRecord, merged: boolean, writes: GitWrites): Promise<void> {
 	const { worktree } = record;
 	if (worktree.kind === "shared") return;
-	if (!merged) await commitWork(record, `${record.name}: unfinished work (removed)`, "");
-	await removeWorktree(worktree.repository, worktree.root);
-	if (merged && worktree.branch !== undefined) {
-		await git(worktree.repository, ["branch", "-D", worktree.branch]).catch(() => undefined);
-	}
+	await writes.run(worktree.repository, async () => {
+		if (!merged) await commitUncommitted(record, `${record.name}: unfinished work (removed)`, "");
+		await removeWorktree(worktree.repository, worktree.root);
+		if (merged && worktree.branch !== undefined) {
+			await git(worktree.repository, ["branch", "-D", worktree.branch]).catch(() => undefined);
+		}
+	});
 }

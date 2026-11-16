@@ -115,7 +115,7 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   that arrives between the end of a child's run and its anchor recording it, fails with an error the sender reads,
   and the sender can send again.
 - **A run woken by a message or by user input takes no running slot and has no time limit (2026-11-16, open for the
-  owner).** Its turn limit applies.
+  owner).** Its turn limit applies. Replaced by the entry on every run taking a slot, below.
 - **The record types are type aliases (2026-11-16).** Durable's documents take JSON types, which interfaces do not
   satisfy; the shapes are unchanged. Added to the contract: `AgentWorktree.repository` (where git runs for the
   worktree), the sender's and receiver's conversation ids on `AgentMessage`, `AgentsDocument`, `AgentMessageLog`, and
@@ -152,3 +152,28 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
 - **`merge` refuses while the user has a merge, cherry-pick, revert or rebase in progress (2026-11-16).** Aborting a
   conflict that was not makora's threw away the user's resolution, and a merge into a stopped rebase landed in its
   middle. A merge that stops without conflicts (a failing hook, failed signing) is aborted and reported as its error.
+- **Every run of a child takes a running slot and gets its whole time limit (2026-11-16, replaces the entry that a
+  woken run takes no slot).** A message, a child's result or typed text that wakes a finished child no longer starts a
+  run at once: the child is `queued`, its anchor takes a slot behind `agents.maxRunning` as for a first run, then
+  submits the input and runs it with the full `minutes` and `turns` of the budget. `usd` stays a total across all runs.
+  Before, `agents.maxRunning` capped only first runs and a woken run had no time limit, so a parent could keep any
+  number of children running and a woken child could run forever.
+- **makora's git writes take turns per repository (2026-11-16).** Commits of a child's work, merges, worktree adds and
+  removes and branch deletes go through one queue per repository and session, keyed by the repository's common git
+  dir. Removing a running write child collided with its anchor committing the child's work on the worktree's
+  `index.lock`. A lock another process holds is waited for about 3 s, then the call fails naming the lock file. Cell
+  snapshots stay outside the queue: they write a temporary index and a ref per conversation, and queueing them would
+  slow every cell.
+- **Deleting a session removes its worktrees and keeps write branches with work (2026-11-16).** `makora rm <id>` and
+  the end of an ephemeral session remove every fork and subagent worktree the session made, its
+  `refs/makora/<session>/` and its folders under the worktree roots. A write branch with unmerged commits, or with
+  changes its worktree left uncommitted (committed to it first), stays: it is the user's work, and a merge can still
+  bring it in. A branch with no commits beyond its base, or a merged one, goes. Worktrees outside the session's folders
+  under makora's roots are never touched. This settles the forks open item: an ephemeral session's fork worktrees go
+  when it ends, rather than staying as its file output, because nothing in makora can open them once the session is
+  gone.
+  There was no delete path before; `rm` sits next to `ls` and asks first, saying which branches stay.
+- **The dashboard list scrolls by the least that keeps the selection in view (2026-11-16).** With more agents than
+  fit, rows past the screen were cut off. The list keeps the title of the section at its top on screen and counts the
+  rows above and below as `↑ N more` and `↓ N more`; under 100 columns it takes at most half the screen so the
+  inspector stays readable.

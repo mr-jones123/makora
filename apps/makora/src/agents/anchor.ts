@@ -1,10 +1,12 @@
 // The anchor: a background task of the parent conversation that owns one child conversation and drives its life. It
 // waits for a running slot, prepares the worktree, starts the child's run, parks until the run settles or something
-// stops it, records the result, wakes the parent, and then rests until a message wakes the child again or it is
-// removed. A failure in git or in the setup command stops the child with that error rather than failing the anchor,
-// which would keep its slot and leave the parent's waits on the child parked for good. Every step that touches other tasks or conversations is a phase of its own: a Durable commit holds at most
-// one table write (one signal or one submission), and each phase commits its effect with the next checkpoint, so a
-// crash reruns at most the side effects that converge (git, kernel stops, conversation aborts).
+// stops it, records the result, wakes the parent, and then rests until an input wakes the child or it is removed. A
+// woken child queues for a slot and gets its time limit again, as for its first run. A failure in git or in the setup
+// command stops the child with that error rather than failing the anchor, which would keep its slot and leave the
+// parent's waits on the child parked for good. Every step that touches other tasks or conversations is a phase of its
+// own: a Durable commit holds at most one table write (one signal or one submission), and each phase commits its
+// effect with the next checkpoint, so a crash reruns at most the side effects that converge (git, kernel stops,
+// conversation aborts).
 import type { Context } from "@earendil-works/chord/context";
 import type { Draft } from "@earendil-works/chord/delta";
 import {
@@ -17,10 +19,12 @@ import {
 	type TaskRuntime,
 	type Tx,
 } from "@earendil-works/pi-durable";
+import type { GitWrites } from "../git/writes.ts";
 import type { KernelManager } from "../kernel/manager.ts";
 import { messageText } from "../transcript-rows.ts";
 import {
 	AgentControl,
+	type AgentRuntime,
 	AgentSlot,
 	AgentsDoc,
 	type AgentsState,
@@ -37,6 +41,8 @@ import { commitWork, finishedResult, type Preparation, prepareAgent, type SetupP
 /** What the anchor needs from the session. */
 export type AnchorOptions = {
 	readonly kernels: KernelManager;
+	/** The session's git writes, one at a time per repository. */
+	readonly git: GitWrites;
 	/** Children running at once in the session, read at each use. */
 	readonly maxRunning: () => number;
 	readonly setup: SetupPolicy;
@@ -55,9 +61,10 @@ type Final =
 	| { readonly kind: "taken" };
 
 type AnchorState =
+	/** Takes a running slot or queues for one: for the first run, and for each run an input wakes. */
 	| { readonly phase: "queue" }
-	/** Woken while queued: by its slot, or by a stop or remove. */
-	| { readonly phase: "dequeued" }
+	/** Woken while queued under round `round`: by its slot, or by a stop or remove. */
+	| { readonly phase: "dequeued"; readonly round: number }
 	| { readonly phase: "prepare" }
 	/** Writes how preparing went into the child's transcript; a failure stops the child. */
 	| { readonly phase: "notice"; readonly prepared: Noted }
@@ -91,7 +98,7 @@ export function createAnchor(options: AnchorOptions) {
 		initial: () => ({ phase: "queue" }),
 		phases: {
 			queue: (task, runtime, context) => queue(task, runtime, options, context),
-			dequeued: (_task, runtime, context) => dequeued(runtime, context),
+			dequeued: (task, runtime, context) => dequeued(task, runtime, task.state.checkpoint.round, context),
 			prepare: (task, runtime, context) => prepare(task, runtime, options, context),
 			notice: (task, runtime, context) => notice(task, runtime, task.state.checkpoint.prepared, options, context),
 			tell: (task, runtime, context) => tell(task, runtime, task.state.checkpoint.prepared, options, context),
@@ -122,25 +129,34 @@ function running(checkpoint: AnchorState): Next {
 
 async function queue(task: Task, runtime: Runtime, options: AnchorOptions, context: Context): Promise<void> {
 	await runtime.commit(async (tx) => {
+		const own = (await tx.doc(AgentsDoc, runtime.conversationId)).runtime[task.input.name]!;
 		const slots = await tx.doc(SlotsDoc);
 		if (slots.running.length < options.maxRunning()) {
 			slots.running.push(task.id);
-			return running({ phase: "prepare" });
+			return running(runPhase(own));
 		}
 		slots.queued.push(task.id);
 		return {
 			status: "sleeping",
-			signals: [AgentSlot.key(SLOT_KEY), AgentControl.key(roundKeys(0).control)],
-			checkpoint: { phase: "dequeued" },
+			signals: [AgentSlot.key(SLOT_KEY), AgentControl.key(roundKeys(own.round).control)],
+			checkpoint: { phase: "dequeued", round: own.round },
 		};
 	}, context);
 }
 
-async function dequeued(runtime: Runtime, context: Context): Promise<void> {
-	const control = await runtime.readSignal(AgentControl, roundKeys(0).control, context);
-	// Without a stop, the slot woke it: the anchor that released the slot already moved this one into `running`.
-	// With one, `release` leaves the queue, and gives back the slot if it came too.
-	await runtime.commit(() => running({ phase: control === undefined ? "prepare" : "release" }), context);
+async function dequeued(task: Task, runtime: Runtime, round: number, context: Context): Promise<void> {
+	const control = await runtime.readSignal(AgentControl, roundKeys(round).control, context);
+	await runtime.commit(async (tx) => {
+		// With a stop, `release` leaves the queue, and gives back the slot if it came too.
+		if (control !== undefined) return running({ phase: "release" });
+		// The slot woke it: the anchor that released the slot already moved this one into `running`.
+		return running(runPhase((await tx.doc(AgentsDoc, runtime.conversationId)).runtime[task.input.name]!));
+	}, context);
+}
+
+/** Where a run goes once it has a slot: a first run prepares the worktree; a woken one starts with the input it holds. */
+function runPhase(own: AgentRuntime): AnchorState {
+	return own.held === undefined ? { phase: "prepare" } : { phase: "start" };
 }
 
 async function prepare(task: Task, runtime: Runtime, options: AnchorOptions, context: Context): Promise<void> {
@@ -153,7 +169,7 @@ async function prepare(task: Task, runtime: Runtime, options: AnchorOptions, con
 	// Memoized, so a crash after the setup command ran does not run it again.
 	const prepared =
 		(await runtime.memo<Preparation>("prepared", context)) ??
-		(await runtime.memo("prepared", await prepareWatched(task, runtime, record, options.setup, context), context));
+		(await runtime.memo("prepared", await prepareWatched(task, runtime, record, options, context), context));
 	await runtime.commit(
 		() => running(prepared.kind === "ready" ? { phase: "start" } : { phase: "notice", prepared }),
 		context,
@@ -165,7 +181,7 @@ async function prepareWatched(
 	task: Task,
 	runtime: Runtime,
 	record: AgentRecord,
-	policy: SetupPolicy,
+	options: AnchorOptions,
 	context: Context,
 ): Promise<Preparation> {
 	const stop = new AbortController();
@@ -183,7 +199,8 @@ async function prepareWatched(
 	try {
 		const prepared = await prepareAgent(
 			record.worktree,
-			policy,
+			options.setup,
+			options.git,
 			closing === undefined ? stop.signal : AbortSignal.any([stop.signal, closing]),
 		);
 		// Cut off by the session closing, not by a stop: prepare again when the session resumes.
@@ -255,23 +272,28 @@ async function start(task: Task, runtime: Runtime, context: Context): Promise<vo
 		const doc = await tx.doc(AgentsDoc, runtime.conversationId);
 		const current = doc.agents[task.input.name]!;
 		if (current.state.kind !== "queued") return running({ phase: "release" });
-		const siblings = Object.values(doc.agents)
-			.filter((each) => each.name !== current.name && each.state.kind !== "removed")
-			.map((each) => each.name);
-		const keys = roundKeys(1);
-		await child.submit(tx, {
-			type: "input",
-			content: agentBrief(current, parentName, siblings, prepared),
-			requestId: `agent-task:${task.id}`,
-			notify: { taskId: task.id, key: keys.settled },
-		});
-		setState(doc, current.name, { kind: "running" }, 1);
+		const { anchor, round: previous, held } = doc.runtime[current.name]!;
+		const round = previous + 1;
+		const keys = roundKeys(round);
+		const notify = { taskId: task.id, key: keys.settled };
+		if (held === undefined) {
+			const siblings = Object.values(doc.agents)
+				.filter((each) => each.name !== current.name && each.state.kind !== "removed")
+				.map((each) => each.name);
+			const brief = agentBrief(current, parentName, siblings, prepared);
+			await child.submit(tx, { type: "input", content: brief, requestId: `agent-task:${task.id}`, notify });
+		} else {
+			await child.submit(tx, { type: "input", ...held, whenBusy: "followUp", notify });
+		}
+		doc.agents[current.name] = { ...current, state: { kind: "running" } };
+		doc.runtime[current.name] = { anchor, round };
+		// Every run, first or woken, gets the whole of `minutes`; the spend in `usd` counts across runs.
 		const minutes = current.budget.minutes;
 		return {
 			status: "sleeping",
 			signals: [SubmissionSettled.key(keys.settled), AgentControl.key(keys.control)],
 			...(minutes === undefined ? {} : { until: runtime.now() + minutes * 60_000 }),
-			checkpoint: { phase: "woke", round: 1 },
+			checkpoint: { phase: "woke", round },
 		};
 	}, context);
 }
@@ -279,6 +301,10 @@ async function start(task: Task, runtime: Runtime, context: Context): Promise<vo
 async function woke(task: Task, runtime: Runtime, round: number, context: Context): Promise<void> {
 	const keys = roundKeys(round);
 	const control = await runtime.readSignal(AgentControl, keys.control, context);
+	if (control !== undefined && "value" in control && control.value.kind === "wake") {
+		await queueWoken(task, runtime, round, context);
+		return;
+	}
 	const settled = await runtime.readSignal(SubmissionSettled, keys.settled, context);
 	const doc = (await runtime.snapshot(AgentsDoc, runtime.conversationId, context))!;
 	const record = doc.agents[task.input.name]!;
@@ -295,6 +321,22 @@ async function woke(task: Task, runtime: Runtime, round: number, context: Contex
 	}
 	if (final.kind === "stopped") await (await runtime.conversation(record.conversationId, context))?.abort(context);
 	await runtime.commit(() => running({ phase: "settle", round, final }), context);
+}
+
+/**
+ * An input woke the resting child under `round`: queue it for a running slot under the next round, so a stop while it
+ * waits signals a key of its own. A child stopped or removed since the wake has nothing to run.
+ */
+async function queueWoken(task: Task, runtime: Runtime, round: number, context: Context): Promise<void> {
+	await runtime.commit(async (tx) => {
+		const doc = await tx.doc(AgentsDoc, runtime.conversationId);
+		const own = doc.runtime[task.input.name]!;
+		if (doc.agents[task.input.name]!.state.kind !== "queued" || own.round !== round) {
+			return running({ phase: "release" });
+		}
+		doc.runtime[task.input.name] = { ...own, round: round + 1 };
+		return running({ phase: "queue" });
+	}, context);
 }
 
 function finalOf(settled: SettledSubmissionRecord): Final {
@@ -315,7 +357,7 @@ async function settle(
 	const { round, final } = checkpoint;
 	const record = await recordOf(task, runtime, context);
 	const summary = final.kind === "done" ? await answerText(runtime, final.answer, context) : "";
-	const state = await settledState(record, final, summary, options.kernels, runtime.now());
+	const state = await settledState(record, final, summary, options, runtime.now());
 	await runtime.commit(async (tx) => {
 		const doc = await tx.doc(AgentsDoc, runtime.conversationId);
 		const name = task.input.name;
@@ -336,28 +378,31 @@ async function settledState(
 	record: AgentRecord,
 	final: Final,
 	summary: string,
-	kernels: KernelManager,
+	options: AnchorOptions,
 	now: number,
 ): Promise<AgentState | undefined> {
 	try {
 		// The child's kernel holds no state worth keeping: a later message restores it from its last snapshot.
-		await kernels.stop(record.conversationId);
+		await options.kernels.stop(record.conversationId);
 		switch (final.kind) {
 			case "taken":
 				if (record.state.kind === "stopped") {
-					await commitWork(record, `${record.name}: unfinished work (stopped: ${record.state.reason})`, "");
+					const title = `${record.name}: unfinished work (stopped: ${record.state.reason})`;
+					await commitWork(record, title, "", options.git);
 				}
 				return undefined;
 			case "done":
-				return { kind: "done", result: await finishedResult(record, summary), at: now };
-			case "stopped":
-				await commitWork(record, `${record.name}: unfinished work (stopped: ${final.reason})`, final.detail ?? "");
+				return { kind: "done", result: await finishedResult(record, summary, options.git), at: now };
+			case "stopped": {
+				const title = `${record.name}: unfinished work (stopped: ${final.reason})`;
+				await commitWork(record, title, final.detail ?? "", options.git);
 				return {
 					kind: "stopped",
 					reason: final.reason,
 					...(final.detail === undefined ? {} : { detail: final.detail }),
 					at: now,
 				};
+			}
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -450,16 +495,15 @@ async function freeSlot(tx: Tx, id: Task["id"]): Promise<void> {
 	if (next !== undefined) slots.running.push(next);
 }
 
-/** After a round: sleep until the child is woken under its current round or stopped, or end once it is removed. */
+/** After a run: sleep until an input wakes the child or a removal ends it; end at once when it is removed. */
 function rest(doc: Readonly<AgentsState>, name: string): Next {
 	if (doc.agents[name]!.state.kind === "removed") {
 		return { status: "terminal", outcome: { status: "completed", result: null } };
 	}
 	const round = doc.runtime[name]!.round;
-	const keys = roundKeys(round);
 	return {
 		status: "sleeping",
-		signals: [SubmissionSettled.key(keys.settled), AgentControl.key(keys.control)],
+		signals: [AgentControl.key(roundKeys(round).control)],
 		checkpoint: { phase: "woke", round },
 	};
 }

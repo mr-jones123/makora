@@ -26,6 +26,7 @@ IDs are time-sortable (UUIDv7). The title is the first line of the first prompt.
 | `makora --resume [id]` (`-r`) | The given session, or a picker |
 | `makora --ephemeral` | A new session kept in memory only ([below](#ephemeral-sessions)) |
 | `makora ls` | Nothing: prints the sessions, newest first |
+| `makora rm <id>` | Nothing: deletes a session after a confirmation ([below](#deleting-a-session)) |
 | `/new`, `/resume` | The same from inside the TUI |
 
 ## Crash recovery
@@ -73,6 +74,43 @@ the Python environment in `~/.makora/python` is still built and used.
 
 In an ephemeral TUI, `/new` starts another ephemeral session and `/resume` opens a stored session. `--ephemeral` with
 `--continue` or `--resume` is rejected.
+
+When an ephemeral session ends (exit, `/new`, `/resume`), it cleans up as `makora rm` does, without asking: its fork
+worktrees, subagent worktrees and write branches without work go, and a write branch with work stays
+([below](#deleting-a-session)).
+
+## Deleting a session
+
+`makora rm <id>` deletes a stored session. It first says what goes and what stays, and asks. From a test run, with the
+temporary folders shortened to `$T`:
+
+```text
+Session 01a1e377-f3bc-73cf-9131-eb82024dd4f8 (untitled, $T/repo). Deleting it:
+  removes review checkout $T/review-worktrees/repo-1ffda3a9/01a1e377-f3bc-73cf-9131-eb82024dd4f8/54
+  removes write worktree $T/write-worktrees/repo-1ffda3a9/01a1e377-f3bc-73cf-9131-eb82024dd4f8/65
+  removes write worktree $T/write-worktrees/repo-1ffda3a9/01a1e377-f3bc-73cf-9131-eb82024dd4f8/79, and its branch makora/idle-4dd4f8-79 (no commits beyond its base)
+  removes fork worktree $T/home/worktrees/repo-1ffda3a9/01a1e377-f3bc-73cf-9131-eb82024dd4f8/37
+  keeps branch makora/writer-4dd4f8-65: 1 commit not merged
+  removes refs/makora/01a1e377-f3bc-73cf-9131-eb82024dd4f8/ and $T/home/sessions/01a1e377-f3bc-73cf-9131-eb82024dd4f8
+Delete it? [y/N] y
+Deleted session 01a1e377-f3bc-73cf-9131-eb82024dd4f8.
+```
+
+- **Worktrees.** Every worktree the session made goes: forks', review checkouts and write worktrees, removed ones'
+  leftovers included. Kernels a crashed makora left running in them are killed first. A fork worktree or review
+  checkout goes with its uncommitted changes, and the confirmation says `with its uncommitted changes`. A folder that
+  is already gone (a cleaned temp folder) is fine; git's record of it is pruned.
+- **Write branches.** A branch that holds work stays: commits beyond its base that are not merged, or changes its
+  worktree left uncommitted, which makora commits to the branch first. A branch with no commits beyond its base, or
+  one that was merged (by `merge`, or reachable from the repository's `HEAD`), is deleted. Merge a kept branch or
+  delete it with `git branch -D`.
+- **The rest.** The session's refs (`refs/makora/<session>/`, the cell snapshots and fork points), its empty folders
+  under the worktree roots, and `~/.makora/sessions/<id>/`.
+- **Left alone.** A worktree outside makora's worktree folders (one made under a root the settings no longer name) is
+  not touched, and the confirmation names it.
+
+Anything but `y` or `yes` deletes nothing and exits 1. A session open in another makora process cannot be deleted.
+Running `rm` again after a crash finishes the job.
 
 ## Compaction
 

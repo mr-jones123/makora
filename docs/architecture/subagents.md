@@ -46,6 +46,9 @@ await merge("fix-db")                                # write mode only; conflict
 4. The child runs like any conversation. Its first `python` call starts its own kernel in the worktree.
 5. When the run settles, the anchor stops the child's kernel, records the result, wakes the parent's waits on this
    child, or else reports the result to the parent as an input, and gives back its slot.
+6. An input to the finished child (a message, a result from its own child, text the user types) wakes it: the child is
+   `queued` again, and the anchor takes a slot as for the first run, submits the input, and watches the new run under
+   the same limits.
 
 ## Records
 
@@ -53,7 +56,7 @@ Every piece of state lives in Durable documents. Nothing is kept only in a kerne
 
 | Document | Scope | Holds |
 | --- | --- | --- |
-| `makora.agents` | Parent conversation | Its children by name: the `AgentRecord` (`src/agents/types.ts`) and the runtime `{ anchor, round }` |
+| `makora.agents` | Parent conversation | Its children by name: the `AgentRecord` (`src/agents/types.ts`) and the runtime `{ anchor, round, held }`; `held` is the input that woke a finished child, kept until its anchor has a slot |
 | `makora.agent` (family, key `self`) | Child conversation | Its name, its parent's conversation id and its depth, written in the commit that creates it |
 | `makora.agent-waiters` | Parent conversation | Its parked `wait_agents` and `collect` calls: names, policy, the signal key, whether messages wake it |
 | `makora.agent-slots` | Session | The anchors holding a running slot, and those queued for one, in order |
@@ -65,7 +68,8 @@ creation time, and a tagged state: `queued`, `running`, `done` (with the result)
 `user`, `cost`, `time`, `turns`, `error` or `parent`), `merged` (with the merge commit) or `removed`.
 
 Three signals wake parked work: `makora.agent-wake` (a waited-for child finished, or a message arrived),
-`makora.agent-control` (stop or remove a child) and `makora.agent-slot` (a queued anchor got a running slot).
+`makora.agent-control` (stop or remove a child, or an input woke a finished one) and `makora.agent-slot` (a queued
+anchor got a running slot).
 
 ## The anchor
 
@@ -73,17 +77,17 @@ The anchor is a state machine. Each phase commits its effect together with the n
 
 | Phase | Does |
 | --- | --- |
-| `queue` | Takes a slot when fewer than `agents.maxRunning` anchors hold one, else queues and sleeps on the slot and control keys |
+| `queue` | Takes a slot when fewer than `agents.maxRunning` anchors hold one, else queues and sleeps on the slot and control keys. It runs before the first run and before each woken run |
 | `dequeued` | Woken by a slot, or by a stop or remove while queued |
-| `prepare` | Adds the worktree and runs the approved setup command, watching the record so a stop or remove kills it; the outcome is memoized, so a crash never runs it twice |
+| `prepare` | First run only. Adds the worktree and runs the approved setup command, watching the record so a stop or remove kills it; the outcome is memoized, so a crash never runs it twice |
 | `notice` | Unless the child was stopped or removed meanwhile, writes the setup outcome into the child's transcript as a `makora.notice` entry. A worktree that could not be added or a failed, timed-out setup stops the child (`error`) in the same commit |
 | `tell` | For a setup command that is not approved, writes the same notice, prefixed with the child's name, into the parent's transcript |
-| `start` | Submits the brief and sleeps on `settled-1` and `control-1`, with a deadline when the budget has `minutes` |
-| `woke` | Reads which key woke it: the run settled, a stop arrived, or the deadline passed; aborts the child when it stopped |
+| `start` | Submits the brief, or for a woken run the input it holds, under the next round, and sleeps on `settled-<round>` and `control-<round>`, with a deadline when the budget has `minutes`. Every run gets the whole of `minutes` |
+| `woke` | Reads which key woke it: the run settled, a stop arrived, or the deadline passed; aborts the child when it stopped. Woken at rest by an input, it moves the child to the next round and back to `queue` |
 | `settle` | Stops the child's kernel, commits a write child's work (also when it stopped), and records `done` or `stopped`; a git failure here records `stopped` with `error` |
 | `notify` | Signals the parent's waits that include this child, one per commit |
 | `report` | When no wait was told, gives the parent the result as an `agent_result` input |
-| `release` | Gives back the slot to the first queued anchor, then sleeps until the child is woken again, or ends once it is removed |
+| `release` | Gives back the slot to the first queued anchor, then sleeps on the control key until an input wakes the child, or ends once it is removed |
 
 A Durable commit holds one table write: a second `tx.signal` or a submission after a signal throws `ReadAfterWrite`.
 That is why notifying waiters, reporting and releasing are separate phases, and why `notify` loops one waiter per commit.
@@ -95,9 +99,16 @@ child's work therefore turn a failure into `stopped` with `error` and its detail
 `release`.
 
 **Rounds.** The anchor sleeps on `settled-<round>` and `control-<round>`. Whoever moves a record out of `running` (the
-anchor's `settle`, or the `stop` tool) advances the round in the same commit. A later wake-up message or user input is
-then submitted with `notify` on the next round's key, so the anchor watches the new run like the first one. A signal
-for an old round finds nobody sleeping on it.
+anchor's `settle`, or the `stop` tool) advances the round in the same commit, and so does the anchor when an input
+wakes the resting child and it queues again. `start` advances it once more for the run it submits. A stop while a
+woken child waits for its slot therefore signals a key of its own, and a signal for an old round finds nobody sleeping
+on it.
+
+**Every run takes a slot.** `admitInput` (`src/agents/family.ts`) never submits to a finished child. In one commit it
+keeps the input as the child's `held` input, records the child `queued`, and signals its resting anchor with
+`{ kind: "wake" }`. The anchor queues for a slot like a first run, and `start` submits the held input with the deadline
+of `minutes`. The turn limit is Durable's `maxTurns`, counted per run. Spend in `usd` is the child's `pi.usage`, which
+counts every run. A stop while it is queued drops the held input.
 
 ## Worktrees and roots
 
@@ -130,6 +141,14 @@ for an old round finds nobody sleeping on it.
   without provider credentials in its environment (names ending in `_API_KEY`, `_TOKEN` or `_SECRET`, and the other
   credential variables pi-ai reads). The group is killed after `agents.setupTimeoutMinutes` (default 10) or when the
   record leaves `queued`.
+- **Git writes take turns.** Committing a child's work, merging, adding and removing worktrees, and deleting branches
+  run through the session's `GitWrites` (`src/git/writes.ts`): one at a time per repository, keyed by its common git
+  dir, so the main worktree and every fork's and child's worktree share one queue. Two of them at once failed on the
+  lock the other held: removing a write child while its anchor committed its work stopped with `index.lock: File
+  exists`. A lock another process holds (the user's own `git commit`) is waited for: `git()` in
+  `src/repl/git-tree.ts` tries again after 50, 100, 200, 400, 800 and 1,600 ms, then fails with the lock's path and
+  how to clear a stale one. The queue lives on the session and forgets a repository once its writes drained. Cell
+  snapshots are not queued: they use a temporary index and their own ref per conversation.
 
 ## Limits
 
@@ -137,14 +156,16 @@ for an old round finds nobody sleeping on it.
 | --- | --- | --- |
 | Turns | 50 | Durable's `maxTurns` on the child; a run that reaches it stops with `turns` |
 | Cost | set per spawn (`usd`) | An `afterTools` hook compares the child's `pi.usage` with the budget after each tool round; past it, the `CostStop` task signals the anchor and ends the run (`cost`) |
-| Wall time | set per spawn (`minutes`) | The anchor's sleep deadline; it aborts the child (`time`) |
+| Wall time | set per spawn (`minutes`) | The anchor's sleep deadline, set again for each run; it aborts the child (`time`) |
 | Depth | 2 | A child of the root (depth 1) may spawn; its children (depth 2) are configured without the `spawn` tool |
-| Running at once | 4 (`agents.maxRunning`) | The `makora.agent-slots` queue; a fifth child waits as `queued` |
+| Running at once | 4 (`agents.maxRunning`) | The `makora.agent-slots` queue; a fifth child, first run or woken, waits as `queued` |
 | Message length | 16,384 characters | `send` refuses longer messages |
 | Pending inputs per receiver | 20 | `send` refuses when the receiver's inbox has 20 items |
 | Message rate | 3 per sender, one more each second | `send` refuses past the bucket |
 
-A stopped child keeps its transcript and worktree until it is removed, so you can see why it stopped.
+A stopped child keeps its transcript and worktree until it is removed, so you can see why it stopped. A child holds its
+slot while it waits for its own children, so with `agents.maxRunning` at 1 a child that waits for a grandchild never
+sees it run.
 
 ## Finishing
 
@@ -177,12 +198,13 @@ conversation, never from Python. Each delivery is one commit:
    that call's result.
 2. Otherwise it is admitted as an `<agent_message from="..." relationship="...">` input (`admitInput` in
    `src/agents/family.ts`): the root gets it as a steer while busy and as a new turn when idle; a running child gets a
-   steer; a finished child (`done`, `stopped` or `merged`) is woken with a follow-up under its anchor's next round and
-   is `running` again, unless its budget refuses the wake (below).
+   steer; a finished child (`done`, `stopped` or `merged`) is woken: it is `queued` until its anchor has a running slot
+   and submits the message, unless its budget refuses the wake (below).
 3. The message goes into `makora.agent-messages`.
 
-A message to a queued or removed child is refused, and so is one that arrives between the end of a child's run and its
-anchor recording it. A broadcast reports each receiver's outcome and goes on past a refusal.
+A message to a queued or removed child is refused, a woken one waiting for its slot included, and so is one that
+arrives between the end of a child's run and its anchor recording it. A broadcast reports each receiver's outcome and
+goes on past a refusal.
 
 **Waking a stopped child.** `admitInput` takes who sends each input: `user`, or the sender's relationship to the
 receiver. A child stopped for `cost`, or whose `pi.usage` has reached its `usd`, refuses every wake: the spend check
@@ -191,7 +213,7 @@ wakes only for its parent or the user, who decide that it may go on; siblings an
 refused.
 
 Text the user types into an opened child takes the same path as a user input (`MakoraSession.submit` in
-`src/session.ts`): a steer while it runs, a wake-up under the next round once it finished, refused while queued or
+`src/session.ts`): a steer while it runs, a wake-up that queues for a slot once it finished, refused while queued or
 removed. Its new result is recorded and reported like the first.
 
 ## `wait_agents` and `collect`
@@ -229,6 +251,15 @@ again after a crash.
   commits an unmerged write child's leftover work to its branch, deletes its worktree (`git worktree remove --force`),
   deletes its branch when merged and keeps an unmerged one, and records `removed`, which ends the anchor. The dashboard
   hides removed children; Durable keeps their transcripts.
+
+**Deleting the session.** `makora rm <id>`, and an ephemeral session as it closes, remove every child's worktree
+(`src/session-delete.ts`). It reads the records of every conversation (`makora.agents`, `makora.fork`), with a
+read-only harness for a stored session, so no work resumes. A write branch stays while it holds work: changes its
+worktree left uncommitted, which are committed to it first as `<name>: unfinished work (session deleted)`, or commits
+beyond its base that were not merged (recorded `merged`, or reachable from the repository's `HEAD`). A branch without
+either is deleted. Then it prunes each repository, deletes `refs/makora/<session>/`, and removes the session's empty
+folders under the worktree roots. A worktree outside `<root>/<repo dir>/<session>/` of a root the settings name now is
+left alone. Each step converges, so running it again after a crash or a cleaned temp folder finishes the job.
 
 ## Crash safety
 
@@ -270,11 +301,9 @@ stop and remove, and Enter opens the agent in the main screen. What the user see
 
 | Item | Today |
 | --- | --- |
-| A run started by a message or by user input to a finished child | Takes no running slot and has no time limit; its turn limit applies |
 | Re-adding a missing worktree before a later cell | Does not rerun the setup command |
 | Cost limit | Checked after each tool round, so a run's final answer is never cut off and one long response can pass the budget |
 | `agents.list()` | Lists only the caller's children; a child learns its siblings' names from its brief |
-| Deleting a session | Does not remove its worktrees or its branches |
 | Model roles (pstack's code and judgment models as a setting) | Not built; `spawn(model=...)` picks a model per child |
 | `interrogate` and `swarm` running real subagents | Not tried end to end |
 | `ctx.get(name)` for child results in a cell | Not built; `agents.get(name)` returns the record |

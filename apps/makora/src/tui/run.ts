@@ -183,6 +183,8 @@ class MakoraTui implements CommandHost {
 				sessionCostUsd: this.#feed?.state.costUsd ?? 0,
 				sessionStartedAt: this.#feed?.session.meta.createdAt ?? Date.now(),
 				frame: this.#frame,
+				// The title row, two rules and the hint row take the rest of the screen.
+				height: Math.max(1, this.#tui.terminal.rows - 4),
 				extras: (row) => ({
 					kernel: this.#feed?.session.kernels.status(row.facts.conversationId) ?? { state: "none", variables: 0 },
 					messages: this.#agents.messages,

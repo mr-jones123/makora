@@ -112,8 +112,9 @@ whose files are shared removes no folder.
 - **Merging a fork back is not built.** A fork's worktree is detached, and `merge` takes a write subagent's branch
   ([subagents.md](subagents.md#merge-stop-and-remove)). Use git in the worktree (`git diff HEAD`, commit,
   cherry-pick); `d` in the agents dashboard shows the fork's changes since its fork point.
-- **Ephemeral sessions** fork at `HEAD` (they save no snapshots), and their fork worktrees stay on disk after the
-  process ends, like any other file a session's tools write. Remove them with `git worktree remove`.
-- **Deleting a session** does not yet remove its fork worktrees and refs.
+- **Ephemeral sessions** fork at `HEAD` (they save no snapshots). Their fork worktrees go when the session ends, with
+  uncommitted changes in them: a fork's worktree is detached, so nothing keeps them.
+- **Deleting a session** (`makora rm`) removes its fork worktrees and the keep-alive refs under
+  `refs/makora/<session>/` ([sessions.md](../features/sessions.md#deleting-a-session), `src/session-delete.ts`).
 - A fork's cell numbers continue from the parent's count when the fork was made (`makora.python-cells` forks as
   `current`), so the fork's first cell can be cell 6 while it restores to after cell 4.

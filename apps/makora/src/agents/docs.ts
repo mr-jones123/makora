@@ -1,17 +1,30 @@
 // The Durable state of subagents: what a conversation keeps about its children, a child about itself, a waiting call
 // about what it waits for, the session's running slots and message log, and the signals that wake parked work.
-import { type ConversationId, defineDoc, defineDocFamily, defineSignal, type TaskId } from "@earendil-works/pi-durable";
+import {
+	type ConversationId,
+	defineDoc,
+	defineDocFamily,
+	defineSignal,
+	type InputEntry,
+	type TaskId,
+} from "@earendil-works/pi-durable";
 import { lit, obj, oneOf, str, union } from "@earendil-works/pi-schema";
 import type { AgentMessageLog, AgentsDocument, StopReason } from "./types.ts";
+
+/** An input that woke a finished child, kept until its anchor has a running slot and submits it. */
+type HeldInput = { readonly content: string; readonly entry?: InputEntry; readonly requestId: string };
 
 /** What the runtime keeps per child next to its record: the anchor task driving it and the round it watches. */
 export type AgentRuntime = {
 	readonly anchor: TaskId;
 	/**
 	 * The anchor's current round: it sleeps on `settled-<round>` and `control-<round>`. Whoever moves the record out of
-	 * `running` advances it in the same commit, so a later wake-up message is watched under the next round.
+	 * `running` advances it in the same commit, and so does the anchor when a wake-up queues the child, so a stop while
+	 * it waits for a slot has a key of its own.
 	 */
 	readonly round: number;
+	/** The input that woke the finished child, while it is queued for a running slot. */
+	readonly held?: HeldInput;
 };
 
 /** The parent's document: the `AgentsDocument` the dashboard reads, plus each child's runtime. */
@@ -125,13 +138,14 @@ export const AgentWake = defineSignal({
 
 const STOP_REASONS = ["user", "cost", "time", "turns", "error", "parent"] as const satisfies readonly StopReason[];
 
-/** Tells an anchor to stop its child, with the reason and what happened, or that the child was removed. */
+/** Tells an anchor to stop its child, with the reason and what happened, that the child was removed, or that an input woke it. */
 export const AgentControl = defineSignal({
 	name: "makora.agent-control",
 	version: 1,
 	schema: union([
 		obj({ kind: lit("stop"), reason: oneOf(STOP_REASONS), detail: str() }),
 		obj({ kind: lit("remove") }),
+		obj({ kind: lit("wake") }),
 	]),
 });
 

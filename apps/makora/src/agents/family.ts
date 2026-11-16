@@ -1,7 +1,7 @@
 // Who a conversation is among the session's agents, the family it may reach (parent, siblings, direct children), and
 // how an input reaches one of them: the root takes it as a steer or a new turn, a running child as a steer, and a
-// finished child is woken under its anchor's next round so its new run is watched like its first, unless its budget
-// keeps it stopped.
+// finished child is woken: it queues for a running slot, and its anchor submits the input as the start of its next run,
+// unless its budget keeps it stopped.
 import type { Context } from "@earendil-works/chord/context";
 import {
 	type ConversationHandle,
@@ -14,7 +14,15 @@ import {
 	UsageDoc,
 } from "@earendil-works/pi-durable";
 import { totalCost } from "../usage.ts";
-import { type AgentSelf, AgentSelfDoc, AgentsDoc, type Relationship, roundKeys, SELF_KEY } from "./docs.ts";
+import {
+	AgentControl,
+	type AgentSelf,
+	AgentSelfDoc,
+	AgentsDoc,
+	type Relationship,
+	roundKeys,
+	SELF_KEY,
+} from "./docs.ts";
 import type { AgentRecord } from "./types.ts";
 
 /** The name the root conversation goes by. */
@@ -88,32 +96,33 @@ export type AgentInput = {
 export class AgentUnreachable extends Error {}
 
 /**
- * Admit `input` into `target` in `tx`, as the commit's one table write, and return its submission. The root gets it as
- * `rootWhenBusy` while it works, or as a new turn. A running child gets a steer, which joins the run its anchor
- * watches. A finished child is woken with a follow-up that notifies its anchor under its current round, and is running
- * again. Throws `AgentUnreachable` for a queued, removed or finishing child, and for a finished one its budget keeps
- * stopped (`wakeRefusal`).
+ * Admit `input` into `target` in `tx`, as the commit's one table write. The root gets it as `rootWhenBusy` while it
+ * works, or as a new turn. A running child gets a steer, which joins the run its anchor watches. Both return the
+ * submission. A finished child is woken: it is queued, its anchor is told, and the input is held until the anchor has a
+ * running slot and submits it under its next round, so a woken run takes a slot and gets its time limit as a first run
+ * does; that returns undefined. Throws `AgentUnreachable` for a queued, removed or finishing child, and for a finished
+ * one its budget keeps stopped (`wakeRefusal`).
  */
 export async function admitInput(
 	tx: Tx,
 	target: InputTarget,
 	input: AgentInput,
 	rootWhenBusy: "steer" | "followUp",
-): Promise<SubmissionId> {
+): Promise<SubmissionId | undefined> {
 	const { handle, self } = target;
-	const draft = {
-		type: "input",
+	const held = {
 		content: input.content,
 		requestId: input.requestId,
 		...(input.entry === undefined ? {} : { entry: input.entry }),
-	} as const;
+	};
+	const draft = { type: "input", ...held } as const;
 	if (self === undefined) return handle.submit(tx, { ...draft, whenBusy: rootWhenBusy });
 	const doc = await tx.doc(AgentsDoc, self.parentConversationId);
 	const record = doc.agents[self.name]!;
 	const runtime = doc.runtime[self.name]!;
 	switch (record.state.kind) {
 		case "queued":
-			throw new AgentUnreachable(`${self.name} is queued and has not started; message it once it runs`);
+			throw new AgentUnreachable(`${self.name} is queued for a running slot; message it once it runs`);
 		case "removed":
 			throw new AgentUnreachable(`${self.name} was removed`);
 		case "running":
@@ -128,13 +137,10 @@ export async function admitInput(
 		case "merged": {
 			const refusal = await wakeRefusal(tx, record, input.from);
 			if (refusal !== undefined) throw new AgentUnreachable(refusal);
-			const id = await handle.submit(tx, {
-				...draft,
-				whenBusy: "followUp",
-				notify: { taskId: runtime.anchor, key: roundKeys(runtime.round).settled },
-			});
-			doc.agents[self.name] = { ...record, state: { kind: "running" } };
-			return id;
+			await tx.signal(runtime.anchor, AgentControl, roundKeys(runtime.round).control, { kind: "wake" });
+			doc.runtime[self.name] = { ...runtime, held };
+			doc.agents[self.name] = { ...record, state: { kind: "queued" } };
+			return undefined;
 		}
 	}
 }

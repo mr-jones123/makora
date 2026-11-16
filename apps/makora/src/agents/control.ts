@@ -12,6 +12,7 @@ import {
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { obj, str, unknown } from "@earendil-works/pi-schema";
+import type { GitWrites } from "../git/writes.ts";
 import type { KernelManager } from "../kernel/manager.ts";
 import { git, MAKORA_AUTHOR } from "../repl/git-tree.ts";
 import { AgentControl, AgentsDoc, roundKeys } from "./docs.ts";
@@ -34,9 +35,11 @@ const NameParameters = obj({ name: str({ description: "The child's name" }) });
 
 const BY_PARENT: StopCause = { reason: "user", detail: "stopped by its parent" };
 
+/** What removing a child stops and deletes with: the session's kernels, and its git writes, one at a time per repository. */
+export type ControlResources = { readonly kernels: KernelManager; readonly git: GitWrites };
+
 /** What the control tools run on. */
-export type ControlOptions = {
-	readonly kernels: KernelManager;
+export type ControlOptions = ControlResources & {
 	/** The cwd of a conversation whose agent sets none. */
 	readonly defaultCwd: string;
 };
@@ -53,7 +56,8 @@ export function createControlTools(options: ControlOptions): ToolRegistration<ty
 			callers: ["tools"],
 			async execute({ name }, api, context) {
 				const record = childOf(await children(api, api.conversationId, context), name);
-				const merged = await mergeAgent(api, record, (await api.agent(context)).cwd ?? options.defaultCwd, context);
+				const cwd = (await api.agent(context)).cwd ?? options.defaultCwd;
+				const merged = await mergeAgent(api, record, cwd, options.git, context);
 				const text =
 					"conflicts" in merged ? `conflicts: ${merged.conflicts.join(", ")}` : `merged ${merged.commit}`;
 				return { output: [{ type: "text", text }], structuredOutput: merged };
@@ -79,7 +83,7 @@ export function createControlTools(options: ControlOptions): ToolRegistration<ty
 			callers: ["tools"],
 			async execute({ name }, api, context) {
 				const record = childOf(await children(api, api.conversationId, context), name);
-				const removed = await removeAgent(api, record, BY_PARENT, options.kernels, context);
+				const removed = await removeAgent(api, record, BY_PARENT, options, context);
 				return { output: [{ type: "text", text: `removed ${removed.join(", ")}` }], structuredOutput: { removed } };
 			},
 		}),
@@ -96,6 +100,7 @@ export async function mergeAgent(
 	api: ControlApi,
 	record: AgentRecord,
 	cwd: string,
+	writes: GitWrites,
 	context: Context,
 ): Promise<MergeOutcome> {
 	const { name, state, worktree } = record;
@@ -104,37 +109,40 @@ export async function mergeAgent(
 	if (state.result.mode !== "write" || worktree.kind !== "worktree" || worktree.branch === undefined) {
 		throw new Error(`${name} has no branch to merge (${state.result.mode} result)`);
 	}
-	const unfinished = await unfinishedOperation(cwd);
-	if (unfinished !== undefined) {
-		throw new Error(`Cannot merge ${name}: ${cwd} has ${unfinished} in progress; finish or abort it first`);
-	}
-	const env = { ...process.env, ...MAKORA_AUTHOR };
-	const message = `Merge ${name} (${worktree.branch})`;
-	try {
-		await git(cwd, ["merge", "--no-ff", "--no-edit", "-m", message, worktree.branch], env);
-	} catch (error) {
-		// No merge was in progress before, so a MERGE_HEAD now is this merge's. Without one, git refused to start (a
-		// dirty tree in the way): the call's error.
-		const started = await git(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]).catch(() => undefined);
-		if (started === undefined) throw error;
-		const conflicts = (await git(cwd, ["diff", "--name-only", "--diff-filter=U"])).split("\n").filter(Boolean);
-		await git(cwd, ["merge", "--abort"]);
-		// A merge that stopped without conflicts failed in a hook or in signing: its error says why.
-		if (conflicts.length === 0) throw error;
-		return { conflicts };
-	}
-	const commit = await git(cwd, ["rev-parse", "HEAD"]);
+	const branch = worktree.branch;
+	const merged = await writes.run(cwd, async (): Promise<MergeOutcome> => {
+		const unfinished = await unfinishedOperation(cwd);
+		if (unfinished !== undefined) {
+			throw new Error(`Cannot merge ${name}: ${cwd} has ${unfinished} in progress; finish or abort it first`);
+		}
+		const env = { ...process.env, ...MAKORA_AUTHOR };
+		try {
+			await git(cwd, ["merge", "--no-ff", "--no-edit", "-m", `Merge ${name} (${branch})`, branch], env);
+		} catch (error) {
+			// No merge was in progress before, so a MERGE_HEAD now is this merge's. Without one, git refused to start (a
+			// dirty tree in the way): the call's error.
+			const started = await git(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]).catch(() => undefined);
+			if (started === undefined) throw error;
+			const conflicts = (await git(cwd, ["diff", "--name-only", "--diff-filter=U"])).split("\n").filter(Boolean);
+			await git(cwd, ["merge", "--abort"]);
+			// A merge that stopped without conflicts failed in a hook or in signing: its error says why.
+			if (conflicts.length === 0) throw error;
+			return { conflicts };
+		}
+		return { merged: true, commit: await git(cwd, ["rev-parse", "HEAD"]) };
+	});
+	if ("conflicts" in merged) return merged;
 	await api.commit(async (tx) => {
 		const doc = await tx.doc(AgentsDoc, record.parentConversationId);
 		const current = doc.agents[name]!;
 		if (current.state.kind === "done") {
 			doc.agents[name] = {
 				...current,
-				state: { kind: "merged", result: current.state.result, mergeCommit: commit, at: api.now() },
+				state: { kind: "merged", result: current.state.result, mergeCommit: merged.commit, at: api.now() },
 			};
 		}
 	}, context);
-	return { merged: true, commit };
+	return merged;
 }
 
 // What git keeps in the git directory while an operation waits for the user, and what it is called.
@@ -155,7 +163,8 @@ async function unfinishedOperation(cwd: string): Promise<string | undefined> {
 
 /**
  * Stop `record` for `cause`: a queued or running child is stopped in one commit that also tells its anchor and moves
- * it to its next round, then its conversation is aborted. Anything else stays as it is. Returns the record after.
+ * it to its next round, then its conversation is aborted. A woken child stopped while it waits for a slot drops the
+ * input that woke it. Anything else stays as it is. Returns the record after.
  */
 export async function stopAgent(
 	api: ControlApi,
@@ -171,7 +180,7 @@ export async function stopAgent(
 		const runtime = doc.runtime[name]!;
 		await tx.signal(runtime.anchor, AgentControl, roundKeys(runtime.round).control, { kind: "stop", ...cause });
 		doc.agents[name] = { ...current, state: { kind: "stopped", ...cause, at: api.now() } };
-		doc.runtime[name] = { ...runtime, round: runtime.round + 1 };
+		doc.runtime[name] = { anchor: runtime.anchor, round: runtime.round + 1 };
 	}, context);
 	await (await api.conversation(record.conversationId, context))?.abort(context);
 	return childOf(await children(api, parentId, context), name);
@@ -187,17 +196,19 @@ export async function removeAgent(
 	api: ControlApi,
 	record: AgentRecord,
 	cause: StopCause,
-	kernels: KernelManager,
+	resources: ControlResources,
 	context: Context,
 ): Promise<string[]> {
 	const removed: string[] = [];
 	for (const child of Object.values(await children(api, record.conversationId, context))) {
-		removed.push(...(await removeAgent(api, child, PARENT_REMOVED, kernels, context)));
+		removed.push(...(await removeAgent(api, child, PARENT_REMOVED, resources, context)));
 	}
 	const parentId = record.parentConversationId;
 	const stopped = await stopAgent(api, record, cause, context);
-	await kernels.stop(record.conversationId);
-	if (stopped.state.kind !== "removed") await removeAgentWorktree(record, stopped.state.kind === "merged");
+	await resources.kernels.stop(record.conversationId);
+	if (stopped.state.kind !== "removed") {
+		await removeAgentWorktree(record, stopped.state.kind === "merged", resources.git);
+	}
 	await api.commit(async (tx) => {
 		const doc = await tx.doc(AgentsDoc, parentId);
 		const current = doc.agents[record.name]!;

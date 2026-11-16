@@ -1,6 +1,7 @@
 // The agents dashboard (layout A): reads every agent of the session from Durable (the main conversation, its forks,
-// and the subagents with their children) and draws the list and the selected agent's inspector. What each row and
-// inspector line says is decided in `dashboard.ts`.
+// and the subagents with their children) and draws the list, scrolled to keep the selected agent in view, and the
+// selected agent's inspector. What each row and inspector line says is decided in `dashboard.ts`; which list lines fit
+// is decided in `list-window.ts`.
 import type { Context } from "@earendil-works/chord/context";
 import {
 	type ConversationId,
@@ -31,6 +32,7 @@ import {
 	type Section,
 } from "./dashboard.ts";
 import { MAKORA_KEYBINDINGS, type MakoraKeybinding } from "./keybindings.ts";
+import { type ListLine, listWindow, type WindowLine } from "./list-window.ts";
 import { theme } from "./theme.ts";
 
 /** What the dashboard reads from Durable at each poll. */
@@ -153,6 +155,8 @@ export interface AgentsSource {
 	readonly sessionCostUsd: number;
 	readonly sessionStartedAt: number;
 	readonly frame: number;
+	/** The rows between the title and the hint row, which the list and, under 100 columns, the inspector share. */
+	readonly height: number;
 	/** What the inspector shows of `row` beyond the row itself. */
 	readonly extras: (row: DashboardRow) => InspectorExtras;
 	/** A message shown in place of the hint row, such as the outcome of a merge. */
@@ -187,6 +191,8 @@ const SIDE_BY_SIDE_FROM = 100;
 export class AgentsView implements Component {
 	readonly #source: () => AgentsSource;
 	readonly #actions: AgentsActions;
+	/** The list line the list's window starts at, which the next render scrolls from. */
+	#top = 0;
 
 	constructor(source: () => AgentsSource, actions: AgentsActions) {
 		this.#source = source;
@@ -240,12 +246,14 @@ export class AgentsView implements Component {
 		const source = this.#source();
 		const selected = source.rows.find((row) => row.facts.conversationId === source.selected) ?? source.rows[0];
 		if (width < SIDE_BY_SIDE_FROM) {
+			// The list takes at most half the rows above the rule; the inspector gets the rest.
+			const list = this.#list(source, selected, width, Math.floor((source.height - 1) / 2));
 			const inspector = selected === undefined ? [] : inspectorLines(selected, source.extras(selected), width);
-			return [...this.#list(source, selected, width), theme.border("─".repeat(width)), ...inspector];
+			return [...list, theme.border("─".repeat(width)), ...inspector];
 		}
 		const leftWidth = Math.min(84, Math.floor(width * 0.6));
 		const rightWidth = width - leftWidth - 3;
-		const left = this.#list(source, selected, leftWidth);
+		const left = this.#list(source, selected, leftWidth, source.height);
 		const right = selected === undefined ? [] : inspectorLines(selected, source.extras(selected), rightWidth);
 		return Array.from({ length: Math.max(left.length, right.length) }, (_, index) => {
 			const cell = left[index] ?? "";
@@ -253,23 +261,39 @@ export class AgentsView implements Component {
 		});
 	}
 
-	#list(source: AgentsSource, selected: DashboardRow | undefined, width: number): string[] {
-		const lines: string[] = [];
+	/** The list in `height` rows: its sections, scrolled by the least that keeps `selected` in view. */
+	#list(source: AgentsSource, selected: DashboardRow | undefined, width: number, height: number): string[] {
+		const lines: ListLine[] = [];
 		for (const [section, title] of SECTIONS) {
-			const rows = source.rows.filter((row) => row.section === section);
-			if (rows.length === 0) continue;
-			if (lines.length > 0) lines.push("");
-			lines.push(` ${theme.dim(title)}`);
-			for (const row of rows) {
-				const line = `${glyph(row.state, source.frame)} ${rowText(row, width - 3)}`;
-				lines.push(
-					row === selected
-						? `${theme.accent("▌")}${theme.band(`${line}${" ".repeat(Math.max(0, width - 1 - visibleWidth(line)))}`)}`
-						: ` ${line}`,
-				);
-			}
+			const indexes = source.rows.flatMap((row, index) => (row.section === section ? [index] : []));
+			if (indexes.length === 0) continue;
+			if (lines.length > 0) lines.push({ kind: "gap" });
+			lines.push({ kind: "header", title });
+			for (const index of indexes) lines.push({ kind: "row", index });
 		}
-		return lines;
+		const at = selected === undefined ? undefined : source.rows.indexOf(selected);
+		const window = listWindow(lines, at, height, this.#top);
+		this.#top = window.top;
+		return window.lines.map((line) => listLine(line, source, selected, width));
+	}
+}
+
+/** One line of the list's window: a section title, a blank line, a row, or a count of the rows scrolled away. */
+function listLine(line: WindowLine, source: AgentsSource, selected: DashboardRow | undefined, width: number): string {
+	switch (line.kind) {
+		case "header":
+			return ` ${theme.dim(line.title)}`;
+		case "gap":
+			return "";
+		case "more":
+			return ` ${theme.muted(`${line.direction === "up" ? "↑" : "↓"} ${line.rows} more`)}`;
+		case "row": {
+			const row = source.rows[line.index]!;
+			const text = `${glyph(row.state, source.frame)} ${rowText(row, width - 3)}`;
+			return row === selected
+				? `${theme.accent("▌")}${theme.band(`${text}${" ".repeat(Math.max(0, width - 1 - visibleWidth(text)))}`)}`
+				: ` ${text}`;
+		}
 	}
 }
 

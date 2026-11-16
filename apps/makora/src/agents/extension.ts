@@ -10,6 +10,7 @@ import {
 	ToolTask,
 	UsageDoc,
 } from "@earendil-works/pi-durable";
+import type { GitWrites } from "../git/writes.ts";
 import type { KernelManager } from "../kernel/manager.ts";
 import { totalCost } from "../usage.ts";
 import { createAnchor } from "./anchor.ts";
@@ -26,6 +27,8 @@ import { ensureAgentWorktree, type SetupPolicy, type WorktreeRoots } from "./wor
 /** What the subagents of one session run on. */
 export type AgentsOptions = {
 	readonly kernels: KernelManager;
+	/** The session's git writes, one at a time per repository. */
+	readonly git: GitWrites;
 	readonly sessionId: string;
 	/** The cwd of a conversation whose agent sets none. */
 	readonly defaultCwd: string;
@@ -44,6 +47,7 @@ export type Agents = { readonly extension: Extension; readonly waitAgents: ToolR
 export function createAgents(options: AgentsOptions): Agents {
 	const anchor = createAnchor({
 		kernels: options.kernels,
+		git: options.git,
 		maxRunning: options.maxRunning,
 		setup: options.setup,
 		settingsFile: options.settingsFile,
@@ -60,7 +64,7 @@ export function createAgents(options: AgentsOptions): Agents {
 			spawn,
 			collectTool,
 			sendTool,
-			...createControlTools({ kernels: options.kernels, defaultCwd: options.defaultCwd }),
+			...createControlTools({ kernels: options.kernels, git: options.git, defaultCwd: options.defaultCwd }),
 			agentsTool,
 			waitAgentsTool,
 		],
@@ -74,7 +78,7 @@ export function createAgents(options: AgentsOptions): Agents {
 					const self = await identityOf(api, api.conversationId, context);
 					if (self === undefined) return undefined;
 					const record = (await api.snapshot(AgentsDoc, self.parentConversationId, context))?.agents[self.name];
-					if (record !== undefined) await ensureAgentWorktree(record.worktree);
+					if (record !== undefined) await ensureAgentWorktree(record.worktree, options.git);
 					return undefined;
 				},
 			}),

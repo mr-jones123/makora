@@ -1,10 +1,13 @@
-// The makora command: parses the arguments and runs the session list, print mode, or the TUI.
+// The makora command: parses the arguments and runs the session list, deleting a session, print mode, or the TUI.
+import { once } from "node:events";
+import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { openApp } from "./app.ts";
 import { parseCli, type SessionChoice, USAGE } from "./cli-args.ts";
 import { homePaths, makoraHome, tildify } from "./paths.ts";
 import { runPrint } from "./print.ts";
 import { type MakoraSession, openEphemeralSession, openSession } from "./session.ts";
+import { describeCleanup, prepareDeletion, type SessionDeletion } from "./session-delete.ts";
 import {
 	createSession,
 	latestSession,
@@ -12,6 +15,7 @@ import {
 	readSession,
 	SessionLockedError,
 	type SessionMeta,
+	sessionDir,
 } from "./sessions.ts";
 import { runTui } from "./tui/run.ts";
 
@@ -28,6 +32,8 @@ async function main(): Promise<number> {
 			return 2;
 		case "list":
 			return listCommand();
+		case "remove":
+			return removeCommand(command.id);
 		case "run":
 			break;
 	}
@@ -96,4 +102,54 @@ function listCommand(): number {
 		process.stdout.write(`${meta.id}  ${updated}  ${tildify(meta.cwd)}  ${meta.title ?? "(untitled)"}\n`);
 	}
 	return 0;
+}
+
+/** `makora rm <id>`: say what deleting the session removes and keeps, ask, then delete it. */
+async function removeCommand(id: string): Promise<number> {
+	const app = openApp(makoraHome(), false);
+	const meta = readSession(app.paths.sessions, id);
+	if (meta === undefined) {
+		process.stderr.write(`makora: no session ${id}\n`);
+		return 1;
+	}
+	let deletion: SessionDeletion;
+	try {
+		deletion = await prepareDeletion(app, meta, BACKGROUND_CONTEXT);
+	} catch (error) {
+		if (!(error instanceof SessionLockedError)) throw error;
+		process.stderr.write(`makora: ${error.message}\n`);
+		return 1;
+	}
+	try {
+		const lines = [
+			`Session ${meta.id} (${meta.title ?? "untitled"}, ${tildify(meta.cwd)}). Deleting it:`,
+			...describeCleanup(deletion.plan, tildify),
+			`  removes refs/makora/${meta.id}/ and ${tildify(sessionDir(app.paths.sessions, meta.id))}`,
+		];
+		process.stdout.write(`${lines.join("\n")}\n`);
+		if (!(await confirmed("Delete it? [y/N] "))) {
+			process.stdout.write("Nothing deleted.\n");
+			return 1;
+		}
+		await deletion.run();
+		process.stdout.write(`Deleted session ${meta.id}.\n`);
+		return 0;
+	} finally {
+		deletion.release();
+	}
+}
+
+/** Ask `question` on stdin; only a line `y` or `yes` is a yes, and an input that ends first is a no. */
+async function confirmed(question: string): Promise<boolean> {
+	process.stdout.write(question);
+	const lines = createInterface({ input: process.stdin });
+	try {
+		const [answer] = await Promise.race([
+			once(lines, "line") as Promise<[string]>,
+			once(lines, "close").then(() => [""] as const),
+		]);
+		return /^y(es)?$/i.test(answer.trim());
+	} finally {
+		lines.close();
+	}
 }

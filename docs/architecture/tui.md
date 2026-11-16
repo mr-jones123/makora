@@ -12,7 +12,8 @@
 | `transcript-view.ts` | Draws feed rows: messages, markdown, thinking, tool summaries or expanded cells (a python cell's code, output tail and nested calls), subagent results and messages (`↩`), notices |
 | `bars.ts` | One-row bars: top bar with the `viewing …` label, activity row with the kernel label (`kernelLabel`), status row, hints, rules; `fitStart` for paths |
 | `splash.ts` | The empty-transcript splash: full (wheel + wordmark) and compact (small wheel) variants |
-| `agents.ts` | The agents dashboard's view, and `loadAgents`: every conversation's `AgentFacts` from Durable (fork record, subagent record, `pi.live`, `pi.usage`, newest entries) and the message log; `countWorktrees` for the activity row |
+| `agents.ts` | The agents dashboard's view, and `loadAgents`: every conversation's `AgentFacts` from Durable (fork record, subagent record, `pi.live`, `pi.usage`, newest entries) and the message log; `countWorktrees` for the activity row. The list is drawn through `list-window.ts` |
+| `list-window.ts` | Which list lines fit the rows the list has: scrolled by the least that keeps the selected row in view, the top section's title kept, `↑ N more` / `↓ N more` for rows cut off |
 | `dashboard.ts` | The dashboard's pure model: `dashboardRows` (sections, indentation, glyph state, mode, branch or ref, budget bar, running cell) and `inspectorLines` |
 | `agent-actions.ts` | What `d`, `m`, `s` and `x` do to the selected agent, with their confirmations, through `src/agents/control.ts` |
 | `dialogs.ts` | Modal selector and text input overlays used by commands and login |

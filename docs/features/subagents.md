@@ -76,22 +76,26 @@ A stopped child keeps its budget when something wakes it:
 - **Cost.** A child stopped for `cost`, or one whose spend has reached its `usd`, takes no more input. A message or
   typed text to it is refused with an error, because each wake spends at least one more model request.
 - **Turns and time.** A child stopped for `turns` or `time` wakes only for its parent or for you typing into it. Its
-  parent or you decide that it may go on; a sibling's message is refused. A woken run gets a fresh `turns` count and no
-  time limit.
+  parent or you decide that it may go on; a sibling's message is refused.
 
-At most 4 children run at once per session (`agents.maxRunning` in `settings.json`). Others wait as `queued`. A child
-may spawn children of its own; a grandchild may not.
+Every run of a child, the first and each one a message or your typing starts, gets the whole of its `minutes` and a
+fresh `turns` count. Spend in `usd` counts every run together.
+
+At most 4 children run at once per session (`agents.maxRunning` in `settings.json`). Others wait as `queued`, and so
+does a finished child woken by a message or by your typing: it runs once a slot frees up. A child may spawn children of
+its own; a grandchild may not. A child holds its slot while it waits for its own children, so with `maxRunning` at 1 a
+child that waits for a grandchild never sees it run.
 
 ## Messaging
 
 `await send(to, message)` reaches the sender's parent (`"parent"`), a sibling or a child by name, or all of them
-(`"all"`). A running receiver gets the message during its current run. A finished one is woken by it and runs again,
-with its transcript and its restored variables, unless its budget keeps it stopped ([Budgets](#budgets)). A parent
-parked in `wait_agents` gets the message as the result of the wait. Messages show in the receiver's transcript as
-`↩ message from <name> (<relationship>)`.
+(`"all"`). A running receiver gets the message during its current run. A finished one is woken by it: it waits as
+`queued` for a running slot, then runs again with its transcript and its restored variables, unless its budget keeps it
+stopped ([Budgets](#budgets)). A parent parked in `wait_agents` gets the message as the result of the wait. Messages
+show in the receiver's transcript as `↩ message from <name> (<relationship>)`.
 
 Limits: 16,384 characters per message, 20 pending messages per receiver, and 3 messages per sender, then one more each
-second. A message to a queued or removed child is refused with an error.
+second. A message to a queued or removed child is refused with an error, a woken one waiting for its slot included.
 
 ## The dashboard
 
@@ -140,7 +144,11 @@ WORKTREE
   `dead` or `none`, with variables and the last snapshot cell); cost, time and turns as `used / limit`; its last 3
   cells; its last messages (`from → to: text`); its worktree's changes against its base (`+N −M · K files`) and path;
   its result when done, or why it stopped.
-- **Narrow terminals.** Below 100 columns the inspector goes under the list.
+- **Narrow terminals.** Below 100 columns the inspector goes under the list, and the list takes at most half the
+  screen.
+- **Scrolling.** With more agents than fit, the list scrolls by the least that keeps the selected row on screen. The
+  title of the section at the top stays visible, and `↑ N more` and `↓ N more` count the agents scrolled away. After a
+  resize the list keeps the selected row in view and fills the rows it gained.
 
 The dashboard reads the agents again every second, so rows change while you watch. After `m`, `s` or `x` it reads them
 once more before the hint row shows the outcome, so `Removed reviewer-a.` never stands next to a row of reviewer-a.
@@ -148,7 +156,7 @@ once more before the hint row shows the outcome, so `Removed reviewer-a.` never 
 | Key | Does |
 | --- | --- |
 | ↑ ↓ | Select |
-| Enter | Open the agent in the main screen. The top bar shows `viewing <name> · <mode> · <branch> · esc back to main`, and what you type goes to that agent: a running one gets it during its run, a finished one runs again |
+| Enter | Open the agent in the main screen. The top bar shows `viewing <name> · <mode> · <branch> · esc back to main`, and what you type goes to that agent: a running one gets it during its run, a finished one queues for a slot and runs again |
 | `d` | The diff view on the agent's worktree, starting on a `vs base <commit>` tab of everything it changed since it started; Esc returns to the dashboard |
 | `m` | Merge a finished write agent into its parent's folder, after a confirmation; the hint row shows the merge commit or the conflicting paths |
 | `s` | Stop a running or queued agent, after a confirmation; it keeps its transcript and worktree |

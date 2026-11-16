@@ -51,13 +51,16 @@ The REPL tests need uv or Python too, because they build a real environment in t
 | --- | --- |
 | `test/kernel.test.ts` | The environment build (two processes at once), the kernel protocol (variables, output, last value, tracebacks, interrupts, timeouts, `os._exit`, host requests), snapshots and restore (shared objects, dropped variables, unchanged blobs), and killing a kernel a crashed process left behind |
 | `test/repl-print.test.ts` | The real CLI with `--fake` in a temporary repo: cells across runs, `write`, `read` (whole files and the long-line refusal) and `edit` through Durable, `ctx`, a kernel crash, files changed since the restored cell, `kill -9` of makora mid-cell, `llm` with and without a schema, `"snapshots": false`, both `restarted empty` notices, and `--ephemeral` |
-| `test/agents.test.ts` | Subagents with real kernels and a temporary repo: parallel review and write children, merge and conflicts, remove, messages and their limits, `wait_agents`, budgets and depth, the setup command, and typing into a finished child |
+| `test/agents.test.ts` | Subagents with real kernels and a temporary repo: parallel review and write children, merge and conflicts, remove, messages and their limits, `wait_agents`, budgets and depth, the setup command, typing into a finished child, a woken child queued for its slot and stopped past its `minutes`, and removing a write child while its anchor commits |
 | `test/agents-crash.test.ts` | A session killed with running children: nothing runs twice, and a deleted review checkout comes back |
 | `test/dashboard.test.ts` | The dashboard's rows (sections, indentation, glyphs, budget bars, the running cell) and inspector lines |
+| `test/git-writes.test.ts` | The per-repository git write queue across worktrees and repositories, and waiting for a lock another process holds |
+| `test/list-window.test.ts` | The dashboard list's window: a list that fits, the selection at the top, middle and bottom, section titles, scrolling up and down, a resize, and a screen too short for the markers |
+| `test/session-delete.test.ts` | `makora rm` on a session with a fork, a reviewer and two writers (one branch with work, one empty), after a cleaned temp folder took the review checkout, and the same cleanup when an ephemeral session closes |
 
 For TUI changes, check the real screen in tmux with `--fake` and a temporary `MAKORA_HOME`, at a wide size (140x40), a
 narrow one (80x40) and a short one (140x20). Example harnesses from phase 1 are kept locally in `.audit/harness/`
-(not committed). `apps/makora/scripts/tmux-agents.sh` and `apps/makora/scripts/tmux-dashboard.sh` drive subagents and
+(not committed). `apps/makora/scripts/tmux-agents.sh`, `apps/makora/scripts/tmux-dashboard.sh` and `scripts/tmux-dashboard-scroll.sh` (40 agents, the list scrolled at 140x40 and 90x40) drive subagents and
 the agents dashboard end to end in a temporary repository; each saves its screens under `/tmp/makora-agents/` or
 `/tmp/makora-dashboard/` and exits non-zero when a wait times out.
 

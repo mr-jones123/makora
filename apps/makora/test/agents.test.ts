@@ -259,9 +259,9 @@ describe("subagents", () => {
 			const firstAt = first.state.at;
 			const child = (await session.harness.conversation(first.conversationId, context))!;
 
-			const submission = await session.submit(child, "```python\nprint('asked again')\n```", context);
-			assert.equal((await records(session, session.root.id)).reviewer?.state.kind, "running", "the input woke it");
-			assert.equal((await submission.wait(context)).status, "done");
+			await session.submit(child, "```python\nprint('asked again')\n```", context);
+			const woken = (await records(session, session.root.id)).reviewer?.state.kind;
+			assert.ok(woken === "queued" || woken === "running", `the input woke it (${woken})`);
 			const second = await until("the second result", async () => {
 				const record = (await records(session, session.root.id)).reviewer!;
 				return record.state.kind === "done" && record.state.at > firstAt ? record.state : undefined;
@@ -274,6 +274,52 @@ describe("subagents", () => {
 				(entry) => entry.kind === AGENT_RESULT_ENTRY && (entry.data as AgentResultData).name === "reviewer",
 			);
 			assert.equal(reports.length, 2, "the parent heard about both runs");
+		} finally {
+			await session.close();
+		}
+	});
+
+	it("queue a woken child for a running slot like a first run, and stop a woken run past its minutes", async () => {
+		const where = workspace({ agents: { maxRunning: 1 } });
+		const session = await open(where);
+		try {
+			const quick = '```python\nprint("first run")\n```';
+			await cell(
+				session.root,
+				`await spawn("sleepy", ${JSON.stringify(quick)}, mode="review", budget={"minutes": 0.05})`,
+			);
+			const first = (await settled(session, session.root, ["sleepy"])).sleepy!;
+			assert.ok(first.state.kind === "done");
+			const firstAt = first.state.at;
+
+			const slow = '```python\nprint((await bash("sleep 8; echo blocked")).output.strip())\n```';
+			await cell(session.root, `await spawn("blocker", ${JSON.stringify(slow)}, mode="review")`);
+			await until("the blocker to hold the slot", async () =>
+				(await records(session, session.root.id)).blocker?.state.kind === "running" ? true : undefined,
+			);
+			assert.match(await cell(session.root, 'print(await send("sleepy", "once more"))'), /'status': 'delivered'/);
+			const waiting = await records(session, session.root.id);
+			assert.deepEqual([waiting.sleepy?.state.kind, waiting.blocker?.state.kind], ["queued", "running"]);
+			let ranBeforeTheSlotFreed = false;
+			await until("the woken run's result", async () => {
+				const children = await records(session, session.root.id);
+				const { sleepy, blocker } = children;
+				if (sleepy?.state.kind === "running" && blocker?.state.kind === "running") ranBeforeTheSlotFreed = true;
+				return sleepy?.state.kind === "done" && sleepy.state.at > firstAt ? true : undefined;
+			});
+			assert.equal(ranBeforeTheSlotFreed, false, "the woken child waited for the blocker's slot");
+
+			const child = (await session.harness.conversation(first.conversationId, context))!;
+			await session.submit(
+				child,
+				'```python\nprint((await bash("sleep 10; echo late")).output.strip())\n```',
+				context,
+			);
+			const stopped = await until("the woken run to time out", async () => {
+				const state = (await records(session, session.root.id)).sleepy?.state;
+				return state?.kind === "stopped" ? state : undefined;
+			});
+			assert.deepEqual([stopped.reason, stopped.detail], ["time", "0.05 minutes passed"]);
 		} finally {
 			await session.close();
 		}
@@ -711,6 +757,46 @@ describe("subagents when something goes wrong", () => {
 			assert.equal(outcome.note, "Removed drafter.");
 			assert.equal(existsSync(root), false);
 			assert.equal(git(where.repo, ["show", `${branch}:DRAFT.md`]), "half done", "the branch keeps the work");
+		} finally {
+			await session.close();
+		}
+	});
+
+	it("remove a write child while its anchor is committing its work, the two git writes taking turns", async () => {
+		const where = workspace();
+		// A clean filter that sleeps holds the worktree's index.lock through the anchor's `git add`, longer than makora
+		// waits for a lock another process holds, so only the per-repository queue lets the removal through.
+		writeFileSync(join(where.repo, ".gitattributes"), "*.slow filter=slow\n");
+		git(where.repo, ["add", ".gitattributes"]);
+		git(where.repo, ["-c", "user.name=test", "-c", "user.email=test@localhost", "commit", "-qm", "slow filter"]);
+		git(where.repo, ["config", "filter.slow.clean", "sleep 5; cat"]);
+		const session = await open(where);
+		try {
+			const task = '```python\nawait write("WORK.slow", "settling\\n")\n```';
+			await cell(session.root, `await spawn("settler", ${JSON.stringify(task)}, mode="write")`);
+			const settler = (await records(session, session.root.id)).settler!;
+			assert.ok(settler.worktree.kind === "worktree" && settler.worktree.branch !== undefined);
+			const { root, branch } = settler.worktree;
+			const gitDir = await until("the worktree", async () =>
+				existsSync(root) ? git(root, ["rev-parse", "--absolute-git-dir"]) : undefined,
+			);
+			await until("the anchor's commit to hold the index lock", async () =>
+				existsSync(join(gitDir, "index.lock")) ? true : undefined,
+			);
+
+			const snapshot = await loadAgents(session.harness, session.root.id, context);
+			const row = dashboardRows(snapshot.facts, Date.now()).find((each) => each.facts.name === "settler")!;
+			const outcome = await removeRow({ session, confirm: async () => true }, row, snapshot.facts);
+			assert.equal(outcome.note, "Removed settler.");
+			assert.equal(existsSync(root), false, "the worktree is gone");
+			assert.equal(git(where.repo, ["show", `${branch}:WORK.slow`]), "settling", "the branch holds the work");
+			await anchorEnded(session, session.root, "settler");
+			assert.equal((await records(session, session.root.id)).settler?.state.kind, "removed");
+			assert.deepEqual(
+				session.notices.filter((notice) => /failed|cut off/.test(notice.message)),
+				[],
+				"the anchor did not fail",
+			);
 		} finally {
 			await session.close();
 		}
