@@ -43,7 +43,8 @@ await merge("fix-db")                                # write mode only; conflict
    so a child owned by the cell would die with it.
 3. The anchor takes a running slot or queues for one, adds the worktree, runs the project's setup command when the user
    approved it, and submits the brief as the child's first input with `notify` set to its own signal key.
-4. The child runs like any conversation. Its first `python` call starts its own kernel in the worktree.
+4. The child runs like any conversation. Its first `python` call starts its own kernel in the worktree. While it waits
+   for its own children, it gives its slot to them and claims one again before it goes on.
 5. When the run settles, the anchor stops the child's kernel, records the result, wakes the parent's waits on this
    child, or else reports the result to the parent as an input, and gives back its slot.
 6. An input to the finished child (a message, a result from its own child, text the user types) wakes it: the child is
@@ -58,8 +59,8 @@ Every piece of state lives in Durable documents. Nothing is kept only in a kerne
 | --- | --- | --- |
 | `makora.agents` | Parent conversation | Its children by name: the `AgentRecord` (`src/agents/types.ts`) and the runtime `{ anchor, round, held }`; `held` is the input that woke a finished child, kept until its anchor has a slot |
 | `makora.agent` (family, key `self`) | Child conversation | Its name, its parent's conversation id and its depth, written in the commit that creates it |
-| `makora.agent-waiters` | Parent conversation | Its parked `wait_agents` and `collect` calls: names, policy, the signal key, whether messages wake it |
-| `makora.agent-slots` | Session | The anchors holding a running slot, and those queued for one, in order |
+| `makora.agent-waiters` | Parent conversation | Its parked `wait_agents` and `collect` calls: names, policy, the signal key, the key a child's call waits on for a slot afterwards, whether messages wake it |
+| `makora.agent-slots` | Session | The anchors holding a running slot, and the claims waiting for one, in order: `resuming` (a child whose wait on its own children ended) is served before `queued` (first and woken runs) |
 | `makora.agent-messages` | Session | The newest 200 messages between agents, for the dashboard |
 | `makora.agent-rates` | Session | Each sender's message bucket, so the rate limit holds across restarts |
 
@@ -69,7 +70,7 @@ creation time, and a tagged state: `queued`, `running`, `done` (with the result)
 
 Three signals wake parked work: `makora.agent-wake` (a waited-for child finished, or a message arrived),
 `makora.agent-control` (stop or remove a child, or an input woke a finished one) and `makora.agent-slot` (a queued
-anchor got a running slot).
+anchor, or a child's wait that ended, got a running slot).
 
 ## The anchor
 
@@ -77,7 +78,7 @@ The anchor is a state machine. Each phase commits its effect together with the n
 
 | Phase | Does |
 | --- | --- |
-| `queue` | Takes a slot when fewer than `agents.maxRunning` anchors hold one, else queues and sleeps on the slot and control keys. It runs before the first run and before each woken run |
+| `queue` | Takes a slot when fewer than `agents.maxRunning` anchors hold one, else puts a claim at the end of `queued` and sleeps on `slot-<round>` and the control key. It runs before the first run and before each woken run |
 | `dequeued` | Woken by a slot, or by a stop or remove while queued |
 | `prepare` | First run only. Adds the worktree and runs the approved setup command, watching the record so a stop or remove kills it; the outcome is memoized, so a crash never runs it twice |
 | `notice` | Unless the child was stopped or removed meanwhile, writes the setup outcome into the child's transcript as a `makora.notice` entry. A worktree that could not be added or a failed, timed-out setup stops the child (`error`) in the same commit |
@@ -85,9 +86,9 @@ The anchor is a state machine. Each phase commits its effect together with the n
 | `start` | Submits the brief, or for a woken run the input it holds, under the next round, and sleeps on `settled-<round>` and `control-<round>`, with a deadline when the budget has `minutes`. Every run gets the whole of `minutes` |
 | `woke` | Reads which key woke it: the run settled, a stop arrived, or the deadline passed; aborts the child when it stopped. Woken at rest by an input, it moves the child to the next round and back to `queue` |
 | `settle` | Stops the child's kernel, commits a write child's work (also when it stopped), and records `done` or `stopped`; a git failure here records `stopped` with `error` |
-| `notify` | Signals the parent's waits that include this child, one per commit |
+| `notify` | Signals the parent's waits that include this child, one per commit. When the parent is a child and the finish ends its wait, the same commit puts the parent's run in line for a slot in `resuming` |
 | `report` | When no wait was told, gives the parent the result as an `agent_result` input |
-| `release` | Gives back the slot to the first queued anchor, then sleeps on the control key until an input wakes the child, or ends once it is removed |
+| `release` | Drops the anchor's claims and gives back its slot to the first claim, `resuming` before `queued`, then sleeps on the control key until an input wakes the child, or ends once it is removed |
 
 A Durable commit holds one table write: a second `tx.signal` or a submission after a signal throws `ReadAfterWrite`.
 That is why notifying waiters, reporting and releasing are separate phases, and why `notify` loops one waiter per commit.
@@ -109,6 +110,32 @@ keeps the input as the child's `held` input, records the child `queued`, and sig
 `{ kind: "wake" }`. The anchor queues for a slot like a first run, and `start` submits the held input with the deadline
 of `minutes`. The turn limit is Durable's `maxTurns`, counted per run. Spend in `usd` is the child's `pi.usage`, which
 counts every run. A stop while it is queued drops the held input.
+
+**A waiting child gives its slot back.** A child that kept its slot while it waited for its own children could
+deadlock the session. With `agents.maxRunning` at 4, the root spawns 4 children, each spawns a grandchild and calls
+`wait_agents`: the 4 children hold every slot, the 4 grandchildren queue behind them, and nothing finishes. With
+`maxRunning` at 1 one child waiting for one grandchild is enough. So `wait_agents` and `collect` (`src/agents/wait.ts`)
+free the slot of the child's anchor in the commit that registers the wait and parks it, and the next claim gets it.
+
+When the wait is over (a child finished, a message came, the deadline passed), the call claims a slot for the anchor
+again in the commit that decides it is over, at the end of `resuming`, ahead of every run that has not started. It
+returns at once when it gets one, and otherwise parks on `slot-<n>` with how the wait ended in its checkpoint, so the
+wake is not lost and the grant wakes it to return just that. The event that ends the wait puts the claim in line
+already, in the commit that signals the call (`lineUpWake`, from the finishing child's `notify` and from `send`). The
+finishing child's anchor gives back its slot in `release` right after `notify`, usually before the woken call runs;
+without the claim in line, that slot went to the next child in `queued`.
+
+`src/agents/slots.ts` holds claiming and freeing. A claim names the anchor, the task its grant wakes and the key; the
+slot itself always counts against the anchor. The anchor's `release` (and its abort handler) drops every claim of the
+anchor and gives back the slot it holds, so a child stopped or removed while it waits, parked or queued for the slot,
+leaks nothing. A wait that ends while its run is ending (the record left `running`) claims nothing. The root holds no
+slot and waits without one. The record stays `running` while the child waits.
+
+A restart is the one case where a run goes on before it has its slot back. `wait_agents` is replay-safe and stays
+parked across it, but a cell is not: Durable ends the cell that awaited a `collect` with an error and abandons the
+parked call, and the child's model goes on. The call's `cancel` claims the slot back at the end of `resuming`; the run
+counts against it once a slot frees. A run that is ending (out of time, aborted) makes the same claim from `cancel`,
+and its anchor's `release` drops it.
 
 ## Worktrees and roots
 
@@ -158,14 +185,12 @@ counts every run. A stop while it is queued drops the held input.
 | Cost | set per spawn (`usd`) | An `afterTools` hook compares the child's `pi.usage` with the budget after each tool round; past it, the `CostStop` task signals the anchor and ends the run (`cost`) |
 | Wall time | set per spawn (`minutes`) | The anchor's sleep deadline, set again for each run; it aborts the child (`time`) |
 | Depth | 2 | A child of the root (depth 1) may spawn; its children (depth 2) are configured without the `spawn` tool |
-| Running at once | 4 (`agents.maxRunning`) | The `makora.agent-slots` queue; a fifth child, first run or woken, waits as `queued` |
+| Running at once | 4 (`agents.maxRunning`) | The `makora.agent-slots` queue; a fifth child, first run or woken, waits as `queued`; a child waiting on its own children holds no slot |
 | Message length | 16,384 characters | `send` refuses longer messages |
 | Pending inputs per receiver | 20 | `send` refuses when the receiver's inbox has 20 items |
 | Message rate | 3 per sender, one more each second | `send` refuses past the bucket |
 
-A stopped child keeps its transcript and worktree until it is removed, so you can see why it stopped. A child holds its
-slot while it waits for its own children, so with `agents.maxRunning` at 1 a child that waits for a grandchild never
-sees it run.
+A stopped child keeps its transcript and worktree until it is removed, so you can see why it stopped.
 
 ## Finishing
 
@@ -230,6 +255,8 @@ same wait inside a cell. Both live in `src/agents/wait.ts`.
 - **A message that came first.** If a message arrived as a steer before the wait registered, `wait_agents` returns at
   once and says a message is queued, so it never blocks on a message already in the inbox.
 - **`collect`'s timeout** is a memoized deadline; at the deadline it returns the records as they are.
+- **Slots.** A child's call frees its run's slot when it parks and claims one again before it returns
+  ([A waiting child gives its slot back](#the-anchor)).
 
 ## Merge, stop and remove
 
@@ -271,7 +298,8 @@ left alone. Each step converges, so running it again after a crash or a cleaned 
 - A review checkout deleted while makora was down comes back before the child's next cell.
 
 `test/agents-crash.test.ts` kills a session with children mid-run, reopens it, and checks that nothing ran twice and
-that a deleted review checkout came back.
+that a deleted review checkout came back. A second case kills it while a child waits on its grandchild with
+`agents.maxRunning` at 1, and checks that both finish and every slot is free after the resume.
 
 ## Tools
 

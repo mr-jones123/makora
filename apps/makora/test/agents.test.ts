@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Conversation, ConversationId } from "@earendil-works/pi-durable";
-import { AgentsDoc, MessageLogDoc } from "../src/agents/docs.ts";
+import { AgentsDoc, MessageLogDoc, SlotsDoc } from "../src/agents/docs.ts";
 import { AgentUnreachable, admitInput, identityOf } from "../src/agents/family.ts";
 import { AGENT_RESULT_ENTRY, type AgentResultData } from "../src/agents/prompts.ts";
 import type { AgentRecord } from "../src/agents/types.ts";
@@ -325,6 +325,41 @@ describe("subagents", () => {
 		}
 	});
 
+	it("queue a child for a running slot again after a first run that waited for one", async () => {
+		const where = workspace({ agents: { maxRunning: 1 } });
+		const session = await open(where);
+		try {
+			await cell(session.root, 'await spawn("blocker", "doze", mode="review")');
+			await until("the blocker to run", async () =>
+				(await records(session, session.root.id)).blocker?.state.kind === "running" ? true : undefined,
+			);
+			await cell(session.root, 'await spawn("twice", "review", mode="review")');
+			assert.equal((await records(session, session.root.id)).twice?.state.kind, "queued");
+			await cell(session.root, 'await stop("blocker")');
+			const first = (await settled(session, session.root, ["twice"])).twice!;
+			assert.ok(first.state.kind === "done");
+
+			await cell(session.root, 'await spawn("again", "doze", mode="review")');
+			await until("the second blocker to run", async () =>
+				(await records(session, session.root.id)).again?.state.kind === "running" ? true : undefined,
+			);
+			assert.match(await cell(session.root, 'print(await send("twice", "once more"))'), /'status': 'delivered'/);
+			assert.equal((await records(session, session.root.id)).twice?.state.kind, "queued");
+			await cell(session.root, 'await stop("again")');
+			const firstAt = first.state.at;
+			await until(
+				"the woken run's result",
+				async () => {
+					const state = (await records(session, session.root.id)).twice?.state;
+					return state?.kind === "done" && state.at > firstAt ? true : undefined;
+				},
+				20_000,
+			);
+		} finally {
+			await session.close();
+		}
+	});
+
 	it("remove a child's worktree, keep an unmerged write branch, and remove a parent's children with it", async () => {
 		const where = workspace();
 		const session = await open(where);
@@ -607,6 +642,172 @@ describe("subagents", () => {
 		}
 	});
 });
+
+describe("subagents waiting on their own children", () => {
+	it("give a waiting child's slot to its grandchild, then back to the child ahead of a child not started yet", async () => {
+		const where = workspace({ agents: { maxRunning: 1 } });
+		const session = await open(where);
+		try {
+			await cell(session.root, 'await spawn("nester", "nest-collect", mode="review")');
+			const nester = (await records(session, session.root.id)).nester!;
+			await until(
+				"the grandchild to run",
+				async () =>
+					(await records(session, nester.conversationId)).grandchild?.state.kind === "running" ? true : undefined,
+				20_000,
+			);
+			await cell(session.root, 'await spawn("late", "review", mode="review")');
+			let lateRanFirst = false;
+			await until("both children to finish", async () => {
+				const { late, nester: current } = await records(session, session.root.id);
+				if (late?.state.kind === "running" && current?.state.kind === "running") lateRanFirst = true;
+				return late?.state.kind === "done" && current?.state.kind === "done" ? true : undefined;
+			});
+			assert.equal(lateRanFirst, false, "the nester got the slot back before late started");
+			assert.equal((await records(session, nester.conversationId)).grandchild?.state.kind, "done");
+			const child = (await session.harness.conversation(nester.conversationId, context))!;
+			assert.match(await lastResult(child, "python"), /^done$/m, "collect returned the grandchild's result");
+			assert.deepEqual(await slots(session), { running: [], resuming: [], queued: [] });
+		} finally {
+			await session.close();
+		}
+	});
+
+	it("run both grandchildren of two waiting children, never more than two runs at once", async () => {
+		const where = workspace({ agents: { maxRunning: 2 } });
+		const session = await open(where);
+		try {
+			await cell(
+				session.root,
+				'await spawn("left", "nest-wait", mode="review")\nawait spawn("right", "nest-wait", mode="review")',
+			);
+			let mostRunning = 0;
+			const children = await until(
+				"the children and grandchildren to finish",
+				async () => {
+					mostRunning = Math.max(mostRunning, (await slots(session)).running.length);
+					const current = await records(session, session.root.id);
+					const kinds: (string | undefined)[] = [];
+					for (const name of ["left", "right"]) {
+						const child = current[name];
+						const grandchild = child && (await records(session, child.conversationId)).grandchild;
+						kinds.push(child?.state.kind, grandchild?.state.kind);
+					}
+					return kinds.every((kind) => kind === "done") ? current : undefined;
+				},
+				30_000,
+			);
+			assert.equal(mostRunning, 2, "two runs held the slots, never more");
+			for (const name of ["left", "right"]) {
+				const child = (await session.harness.conversation(children[name]!.conversationId, context))!;
+				assert.match(await lastResult(child, "wait_agents"), /^grandchild: done$/m);
+			}
+			assert.deepEqual(await slots(session), { running: [], resuming: [], queued: [] });
+		} finally {
+			await session.close();
+		}
+	});
+
+	it("hand a waiting child the message that woke it once it has a slot again", async () => {
+		const where = workspace({ agents: { maxRunning: 1 } });
+		const session = await open(where);
+		try {
+			await cell(session.root, 'await spawn("listener", "nest-wait", mode="review")');
+			const listener = (await records(session, session.root.id)).listener!;
+			const anchor = (await session.harness.snapshot(AgentsDoc, session.root.id, context))!.runtime.listener!.anchor;
+			await holdsSlot(session, listener.conversationId, "grandchild");
+			assert.match(await cell(session.root, 'print(await send("listener", "news"))'), /'status': 'delivered'/);
+			await until("the listener to queue for the slot", async () =>
+				(await slots(session)).resuming.some((claim) => claim.anchor === anchor) ? true : undefined,
+			);
+			const conversation = (await session.harness.conversation(listener.conversationId, context))!;
+			const heard = await until("the listener's wait to return", async () => {
+				const page = await conversation.entries({ order: "descending" }, 100, undefined, context);
+				const wait = page.items.find((entry) => entry.model?.[0]?.role === "toolResult");
+				const message = wait?.model?.[0];
+				return message?.role === "toolResult" && message.toolName === "wait_agents"
+					? messageText(message)
+					: undefined;
+			});
+			assert.equal(heard, '<agent_message from="main" relationship="parent">\nnews\n</agent_message>');
+			await until("everything to settle", async () => {
+				const { listener: current } = await records(session, session.root.id);
+				const grandchild = (await records(session, listener.conversationId)).grandchild;
+				const idle = current?.state.kind === "done" && grandchild?.state.kind === "done";
+				const { running, resuming, queued } = await slots(session);
+				return idle && running.length + resuming.length + queued.length === 0 ? true : undefined;
+			});
+		} finally {
+			await session.close();
+		}
+	});
+
+	it("keep the slots right when a child is stopped or removed while it waits without one", async () => {
+		const where = workspace({ agents: { maxRunning: 1 } });
+		const session = await open(where);
+		try {
+			// Stopped while it is queued for the slot its grandchild holds: a message ended its wait.
+			await cell(session.root, 'await spawn("holder", "nest-hold", mode="review")');
+			const holder = (await records(session, session.root.id)).holder!;
+			const holderAnchor = (await session.harness.snapshot(AgentsDoc, session.root.id, context))!.runtime.holder!
+				.anchor;
+			const grandchildAnchor = await holdsSlot(session, holder.conversationId, "grandchild");
+			assert.match(await cell(session.root, 'print(await send("holder", "news"))'), /'status': 'delivered'/);
+			await until("the holder to queue for the slot", async () =>
+				(await slots(session)).resuming.some((claim) => claim.anchor === holderAnchor) ? true : undefined,
+			);
+			await cell(session.root, 'await stop("holder")');
+			await until("the holder to leave the queue", async () =>
+				(await slots(session)).resuming.length === 0 ? true : undefined,
+			);
+			assert.deepEqual((await slots(session)).running, [grandchildAnchor], "the grandchild keeps its slot");
+			assert.match(
+				await cell(session.root, 'print(await remove("holder"))'),
+				/'removed': \['grandchild', 'holder'\]/,
+			);
+
+			// Removed while it is parked, its grandchild holding the slot.
+			await cell(session.root, 'await spawn("parker", "nest-hold", mode="review")');
+			const parker = (await records(session, session.root.id)).parker!;
+			await holdsSlot(session, parker.conversationId, "grandchild");
+			assert.match(
+				await cell(session.root, 'print(await remove("parker"))'),
+				/'removed': \['grandchild', 'parker'\]/,
+			);
+
+			await cell(session.root, 'await spawn("after", "review", mode="review")');
+			assert.equal(
+				(await settled(session, session.root, ["after"])).after?.state.kind,
+				"done",
+				"a later child runs",
+			);
+			await until("every slot to be free", async () => {
+				const { running, resuming, queued } = await slots(session);
+				return running.length + resuming.length + queued.length === 0 ? true : undefined;
+			});
+		} finally {
+			await session.close();
+		}
+	});
+});
+
+/** The session's running slots. */
+async function slots(session: MakoraSession) {
+	return (await session.harness.snapshot(SlotsDoc, context))!;
+}
+
+/** Wait until the anchor of `parentId`'s child `name` holds the session's only running slot; that anchor. */
+function holdsSlot(session: MakoraSession, parentId: ConversationId, name: string) {
+	return until(
+		`${name} to hold the slot`,
+		async () => {
+			const anchor = (await session.harness.snapshot(AgentsDoc, parentId, context))?.runtime[name]?.anchor;
+			const { running } = await slots(session);
+			return anchor !== undefined && running.length === 1 && running[0] === anchor ? anchor : undefined;
+		},
+		20_000,
+	);
+}
 
 describe("subagents when something goes wrong", () => {
 	it("refuse to merge into an unfinished merge or rebase, and report a failing merge hook as an error", async () => {

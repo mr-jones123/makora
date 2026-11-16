@@ -65,12 +65,14 @@ export const AgentSelfDoc = defineDocFamily<AgentSelf, AgentSelf>({
 export const SELF_KEY = "self";
 
 /** One parked `wait_agents` or `collect` call. */
-type Waiter = {
+export type Waiter = {
 	readonly task: TaskId;
 	readonly names: string[];
 	readonly policy: "any" | "all";
 	/** The signal key the call sleeps on now; a new key for every park. */
 	readonly key: string;
+	/** The signal key a child's call sleeps on for a running slot once an event on `key` ended its wait. */
+	readonly slot: string;
 	/** `wait_agents` also wakes on a message to its conversation; `collect` does not. */
 	readonly messages: boolean;
 	/** Signalled since it parked on `key`; a second event waits until it parks again. */
@@ -88,12 +90,19 @@ export const WaitersDoc = defineDoc<{ waiters: Record<string, Waiter> }>({
 	checkpointWhen: () => false,
 });
 
-/** `makora.agent-slots`: the anchors holding one of the session's running slots, and those queued for one, in order. */
-export const SlotsDoc = defineDoc<{ running: TaskId[]; queued: TaskId[] }>({
+/** A claim on a running slot: the anchor whose child is to run, and the task and signal key the grant wakes. */
+export type SlotClaim = { readonly anchor: TaskId; readonly task: TaskId; readonly key: string };
+
+/**
+ * `makora.agent-slots`: the anchors holding one of the session's running slots, and the claims waiting for one, in
+ * order. A freed slot goes to the first claim in `resuming` (a child whose wait on its own children ended) before any
+ * in `queued` (a child's first run, or a run an input woke).
+ */
+export const SlotsDoc = defineDoc<{ running: TaskId[]; resuming: SlotClaim[]; queued: SlotClaim[] }>({
 	kind: "makora.agent-slots",
-	version: 1,
+	version: 2,
 	scope: "session",
-	initial: () => ({ running: [], queued: [] }),
+	initial: () => ({ running: [], resuming: [], queued: [] }),
 	checkpointWhen: () => true,
 });
 
@@ -149,10 +158,14 @@ export const AgentControl = defineSignal({
 	]),
 });
 
-/** Hands a queued anchor the running slot another anchor released. */
+/** Hands a claim the running slot an anchor gave up: a queued anchor, or a child's wait that ended. */
 export const AgentSlot = defineSignal({ name: "makora.agent-slot", version: 1, schema: obj({}) });
 
 /** The keys an anchor sleeps on in `round`. */
-export function roundKeys(round: number): { readonly settled: string; readonly control: string } {
-	return { settled: `settled-${round}`, control: `control-${round}` };
+export function roundKeys(round: number): {
+	readonly settled: string;
+	readonly control: string;
+	readonly slot: string;
+} {
+	return { settled: `settled-${round}`, control: `control-${round}`, slot: `slot-${round}` };
 }

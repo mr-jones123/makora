@@ -21,7 +21,7 @@ import { identityOf } from "./family.ts";
 import { sendTool } from "./messaging.ts";
 import { agentsTool } from "./read.ts";
 import { createSpawnTool } from "./spawn.ts";
-import { collectTool, waitAgentsTool } from "./wait.ts";
+import { createWaitTools } from "./wait.ts";
 import { ensureAgentWorktree, type SetupPolicy, type WorktreeRoots } from "./worktree.ts";
 
 /** What the subagents of one session run on. */
@@ -58,15 +58,16 @@ export function createAgents(options: AgentsOptions): Agents {
 		defaultCwd: options.defaultCwd,
 		anchor,
 	});
+	const waits = createWaitTools(options.maxRunning);
 	const extension = defineExtension({
 		name: "makora-agents",
 		tools: [
 			spawn,
-			collectTool,
+			waits.collect,
 			sendTool,
 			...createControlTools({ kernels: options.kernels, git: options.git, defaultCwd: options.defaultCwd }),
 			agentsTool,
-			waitAgentsTool,
+			waits.waitAgents,
 		],
 		tasks: [anchor, CostStop],
 		hooks: [
@@ -100,5 +101,5 @@ export function createAgents(options: AgentsOptions): Agents {
 			}),
 		],
 	});
-	return { extension, waitAgents: waitAgentsTool };
+	return { extension, waitAgents: waits.waitAgents };
 }

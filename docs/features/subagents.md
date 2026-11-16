@@ -83,8 +83,9 @@ fresh `turns` count. Spend in `usd` counts every run together.
 
 At most 4 children run at once per session (`agents.maxRunning` in `settings.json`). Others wait as `queued`, and so
 does a finished child woken by a message or by your typing: it runs once a slot frees up. A child may spawn children of
-its own; a grandchild may not. A child holds its slot while it waits for its own children, so with `maxRunning` at 1 a
-child that waits for a grandchild never sees it run.
+its own; a grandchild may not. A child that waits for its own children (`wait_agents` or `collect`) gives its slot to
+them meanwhile, so even with `maxRunning` at 1 its grandchild runs. When its wait is over it needs a slot again before
+it goes on, and it gets the next free one before any child that has not started yet. It still shows as running.
 
 ## Messaging
 

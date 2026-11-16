@@ -6,7 +6,8 @@
 // parent's waits on the child parked for good. Every step that touches other tasks or conversations is a phase of its
 // own: a Durable commit holds at most one table write (one signal or one submission), and each phase commits its
 // effect with the next checkpoint, so a crash reruns at most the side effects that converge (git, kernel stops,
-// conversation aborts).
+// conversation aborts). While the child waits on its own children it gives its slot to the queue and claims it again
+// (`wait.ts`); the slot and every claim count against the anchor, which gives back both when the run ends.
 import type { Context } from "@earendil-works/chord/context";
 import type { Draft } from "@earendil-works/chord/delta";
 import {
@@ -17,7 +18,6 @@ import {
 	type SettledSubmissionRecord,
 	SubmissionSettled,
 	type TaskRuntime,
-	type Tx,
 } from "@earendil-works/pi-durable";
 import type { GitWrites } from "../git/writes.ts";
 import type { KernelManager } from "../kernel/manager.ts";
@@ -30,12 +30,13 @@ import {
 	type AgentsState,
 	AgentWake,
 	roundKeys,
-	SlotsDoc,
 	WaitersDoc,
 } from "./docs.ts";
 import { AgentUnreachable, admitInput, identityOf, ROOT_NAME } from "./family.ts";
 import { AGENT_RESULT_ENTRY, type AgentResultData, agentBrief, agentResultText, setupNotice } from "./prompts.ts";
+import { claimSlot, freeSlot } from "./slots.ts";
 import type { AgentRecord, AgentState, StopReason } from "./types.ts";
+import { isOver, lineUpWake } from "./wait.ts";
 import { commitWork, finishedResult, type Preparation, prepareAgent, type SetupPolicy } from "./worktree.ts";
 
 /** What the anchor needs from the session. */
@@ -78,7 +79,7 @@ type AnchorState =
 	| { readonly phase: "notify"; readonly round: number; readonly notified: boolean }
 	/** Tells a parent that was not waiting. */
 	| { readonly phase: "report"; readonly round: number }
-	/** Gives back the running slot, if the anchor holds one, then rests or ends. */
+	/** Gives back the running slot, if the anchor holds one, and any claim on one, then rests or ends. */
 	| { readonly phase: "release" };
 
 /** A preparation the child's transcript hears about. */
@@ -87,8 +88,6 @@ type Skipped = Extract<Preparation, { readonly kind: "skipped" }>;
 
 type Runtime = TaskRuntime<AnchorInput, AnchorState, null, object>;
 type Next = NextTaskState<AnchorState, null>;
-
-const SLOT_KEY = "slot";
 
 /** The anchor task over the session's kernels and slot limit. */
 export function createAnchor(options: AnchorOptions) {
@@ -130,15 +129,12 @@ function running(checkpoint: AnchorState): Next {
 async function queue(task: Task, runtime: Runtime, options: AnchorOptions, context: Context): Promise<void> {
 	await runtime.commit(async (tx) => {
 		const own = (await tx.doc(AgentsDoc, runtime.conversationId)).runtime[task.input.name]!;
-		const slots = await tx.doc(SlotsDoc);
-		if (slots.running.length < options.maxRunning()) {
-			slots.running.push(task.id);
-			return running(runPhase(own));
-		}
-		slots.queued.push(task.id);
+		const keys = roundKeys(own.round);
+		const claim = { anchor: task.id, task: task.id, key: keys.slot };
+		if (await claimSlot(tx, claim, "queued", options.maxRunning())) return running(runPhase(own));
 		return {
 			status: "sleeping",
-			signals: [AgentSlot.key(SLOT_KEY), AgentControl.key(roundKeys(own.round).control)],
+			signals: [AgentSlot.key(keys.slot), AgentControl.key(keys.control)],
 			checkpoint: { phase: "dequeued", round: own.round },
 		};
 	}, context);
@@ -429,11 +425,17 @@ async function notify(
 ): Promise<void> {
 	const { round, notified } = checkpoint;
 	const name = task.input.name;
+	// A parent that is a child itself needs a running slot to go on once its wait is over.
+	const parentSelf = await identityOf(runtime, runtime.conversationId, context);
 	await runtime.commit(async (tx) => {
 		const waiters = await tx.doc(WaitersDoc, runtime.conversationId);
 		const target = Object.values(waiters.waiters).find((waiter) => !waiter.fired && waiter.names.includes(name));
 		if (target === undefined) {
 			return running(notified ? { phase: "release" } : { phase: "report", round });
+		}
+		// Lined up before this anchor's `release`, the parent gets the slot it frees.
+		if (isOver(target, (await tx.doc(AgentsDoc, runtime.conversationId)).agents)) {
+			await lineUpWake(tx, target, parentSelf);
 		}
 		const result = await tx.signal(target.task, AgentWake, target.key, { kind: "finished", name });
 		// A wait that ended meanwhile is forgotten; it was not told.
@@ -481,18 +483,6 @@ async function release(task: Task, runtime: Runtime, context: Context): Promise<
 		await freeSlot(tx, task.id);
 		return rest(doc, task.input.name);
 	}, context);
-}
-
-/** Give up `id`'s running slot, if it holds one, to the first anchor in the queue; leave the queue too. */
-async function freeSlot(tx: Tx, id: Task["id"]): Promise<void> {
-	const slots = await tx.doc(SlotsDoc);
-	const queued = slots.queued.filter((each) => each !== id);
-	const holds = slots.running.includes(id);
-	const next = holds ? queued[0] : undefined;
-	if (next !== undefined) await tx.signal(next, AgentSlot, SLOT_KEY, {});
-	slots.running = slots.running.filter((each) => each !== id);
-	slots.queued = next === undefined ? queued : queued.slice(1);
-	if (next !== undefined) slots.running.push(next);
 }
 
 /** After a run: sleep until an input wakes the child or a removal ends it; end at once when it is removed. */

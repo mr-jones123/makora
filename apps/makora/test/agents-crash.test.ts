@@ -8,7 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type ConversationRecord, type Cursor, ToolResultEntry } from "@earendil-works/pi-durable";
-import { AgentsDoc, MessageLogDoc } from "../src/agents/docs.ts";
+import { AgentsDoc, MessageLogDoc, SlotsDoc } from "../src/agents/docs.ts";
 import { openApp } from "../src/app.ts";
 import { openSession } from "../src/session.ts";
 import { latestSession } from "../src/sessions.ts";
@@ -50,36 +50,50 @@ async function until(what: string, check: () => boolean, timeoutMs = 60_000): Pr
 	}
 }
 
-describe("subagents after a crash", () => {
-	it("resume with the session, run nothing twice, and get a deleted review worktree back", async () => {
-		const root = realpathSync(mkdtempSync(join(tmpdir(), "makora-agents-crash-")));
-		const home = join(root, "home");
-		const repo = join(root, "repo");
-		const review = join(root, "review-worktrees");
-		mkdirSync(home);
-		mkdirSync(repo);
-		writeFileSync(join(home, "settings.json"), JSON.stringify({ worktrees: { review, write: join(root, "write") } }));
-		writeFileSync(join(repo, "README.md"), "# demo\n");
-		git(repo, ["init", "-q", "-b", "main"]);
-		git(repo, ["add", "README.md"]);
-		git(repo, ["-c", "user.name=test", "-c", "user.email=test@localhost", "commit", "-qm", "init"]);
+/** A temp makora home with `agents` in its settings, and a git repository with one commit. */
+function workspace(agents: Record<string, unknown>): { home: string; repo: string; review: string } {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "makora-agents-crash-")));
+	const home = join(root, "home");
+	const repo = join(root, "repo");
+	const review = join(root, "review-worktrees");
+	mkdirSync(home);
+	mkdirSync(repo);
+	const worktrees = { review, write: join(root, "write") };
+	writeFileSync(join(home, "settings.json"), JSON.stringify({ worktrees, agents }));
+	writeFileSync(join(repo, "README.md"), "# demo\n");
+	git(repo, ["init", "-q", "-b", "main"]);
+	git(repo, ["add", "README.md"]);
+	git(repo, ["-c", "user.name=test", "-c", "user.email=test@localhost", "commit", "-qm", "init"]);
+	return { home, repo, review };
+}
 
-		const first = makora(home, repo, ["-p", "resume-team"]);
-		const firstExit = exited(first);
-		const sessions = join(home, "sessions");
-		const kernels = () => {
-			const [id] = existsSync(sessions) ? readdirSync(sessions) : [];
-			const dir = id === undefined ? undefined : join(sessions, id, "kernels");
-			return dir !== undefined && existsSync(dir) ? readdirSync(dir).length : 0;
-		};
-		// The root's kernel and both slow children's kernels: the children are inside their three-second cells.
+/** Run makora with `prompt` and kill it once three kernels run, half a second later. */
+async function killAtThreeKernels(home: string, repo: string, prompt: string): Promise<void> {
+	const first = makora(home, repo, ["-p", prompt]);
+	const firstExit = exited(first);
+	const sessions = join(home, "sessions");
+	const kernels = () => {
+		const [id] = existsSync(sessions) ? readdirSync(sessions) : [];
+		const dir = id === undefined ? undefined : join(sessions, id, "kernels");
+		return dir !== undefined && existsSync(dir) ? readdirSync(dir).length : 0;
+	};
+	try {
 		await until("three kernels", () => kernels() >= 3);
 		await sleep(500);
+	} finally {
 		first.kill("SIGKILL");
-		const killed = await firstExit;
-		assert.equal(killed.code, null, `makora was killed:\n${killed.output}`);
+	}
+	const killed = await firstExit;
+	assert.equal(killed.code, null, `makora was killed:\n${killed.output}`);
+}
 
-		const meta = latestSession(sessions, repo)!;
+describe("subagents after a crash", () => {
+	it("resume with the session, run nothing twice, and get a deleted review worktree back", async () => {
+		const { home, repo, review } = workspace({});
+		// The root's kernel and both slow children's kernels: the children are inside their three-second cells.
+		await killAtThreeKernels(home, repo, "resume-team");
+
+		const meta = latestSession(join(home, "sessions"), repo)!;
 		const reviewDir = join(review, readdirSync(review)[0]!, meta.id);
 		const worktrees = readdirSync(reviewDir).map((name) => join(reviewDir, name));
 		assert.equal(worktrees.length, 3);
@@ -143,6 +157,35 @@ describe("subagents after a crash", () => {
 			const after = (await session.harness.snapshot(AgentsDoc, session.root.id, context))!.agents;
 			assert.equal(Object.keys(after).length, 3);
 			assert.equal(after["slow-a"]!.conversationId, agents["slow-a"]!.conversationId);
+		} finally {
+			await session.close();
+		}
+	});
+
+	it("resume a child that waits on its grandchild with the only running slot given to the grandchild", async () => {
+		const { home, repo } = workspace({ maxRunning: 1 });
+		// The root's, the keeper's and the grandchild's kernels: the keeper waits, and its grandchild is in its cell.
+		await killAtThreeKernels(home, repo, "deep-team");
+
+		const second = await exited(makora(home, repo, ["--continue", "-p", ""]));
+		assert.equal(second.code, 0, second.output);
+
+		const meta = latestSession(join(home, "sessions"), repo)!;
+		const session = await openSession(openApp(home, true), meta, {}, context);
+		try {
+			const keeper = (await session.harness.snapshot(AgentsDoc, session.root.id, context))!.agents.keeper!;
+			assert.equal(keeper.state.kind, "done");
+			const below = (await session.harness.snapshot(AgentsDoc, keeper.conversationId, context))!.agents;
+			assert.equal(below.grandchild?.state.kind, "done");
+			const child = await session.harness.conversation(keeper.conversationId, context);
+			const entries = (await child!.entries({ order: "ascending" }, 200, undefined, context)).items;
+			const waits = entries.flatMap((entry) => {
+				const message = entry.model?.[0];
+				return message?.role === "toolResult" && message.toolName === "wait_agents" ? [messageText(message)] : [];
+			});
+			assert.equal(waits.length, 1);
+			assert.match(waits[0]!, /^grandchild: done$/m);
+			assert.deepEqual(await session.harness.snapshot(SlotsDoc, context), { running: [], resuming: [], queued: [] });
 		} finally {
 			await session.close();
 		}

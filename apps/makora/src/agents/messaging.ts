@@ -9,6 +9,7 @@ import { obj, str, unknown } from "@earendil-works/pi-schema";
 import { type AgentSelf, AgentWake, MessageLogDoc, RatesDoc, WaitersDoc } from "./docs.ts";
 import { admitInput, familyOf, identityOf, type Member, ROOT_NAME } from "./family.ts";
 import { AGENT_MESSAGE_ENTRY, type AgentMessageData, agentMessageText } from "./prompts.ts";
+import { lineUpWake } from "./wait.ts";
 
 /** A message longer than this, after trimming, is refused. */
 const MAX_MESSAGE_CHARS = 16_384;
@@ -135,6 +136,7 @@ async function deliver(
 				"steer",
 			);
 		} else {
+			await lineUpWake(tx, waiter, targetSelf);
 			const result = await tx.signal(waiter.task, AgentWake, waiter.key, { kind: "message", ...message });
 			if (result !== "delivered") throw new Error(`${target.name} is ending a wait; send again`);
 			waiters.waiters[String(waiter.task)] = { ...waiter, fired: true };

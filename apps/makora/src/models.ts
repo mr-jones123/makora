@@ -108,6 +108,10 @@ export const FAKE_SCRIPTS: readonly { readonly keyword: string; readonly cells: 
 			{ wait: { names: ["slow-a", "slow-b", "talker"], policy: "all" } },
 		],
 	},
+	{
+		keyword: "deep-team",
+		cells: ['await spawn("keeper", "nest-wait", mode="review")', { wait: { names: ["keeper"], policy: "all" } }],
+	},
 	{ keyword: "message-sibling", cells: ['print(await send("slow-a", "hello sibling"))'] },
 	{
 		keyword: "steady",
@@ -128,6 +132,20 @@ export const FAKE_SCRIPTS: readonly { readonly keyword: string; readonly cells: 
 	{ keyword: "write-change", cells: ['await write("CHANGES.md", "writer was here\\n")'] },
 	{ keyword: "review", cells: ['print("README:", open("README.md").read().strip())'] },
 	{ keyword: "slow", cells: ['print((await bash("sleep 3; echo slept")).output.strip())'] },
+	{
+		keyword: "nest-collect",
+		cells: [
+			'await spawn("grandchild", "slow", mode="review")\nprint((await collect(["grandchild"]))["grandchild"]["state"]["kind"])',
+		],
+	},
+	{
+		keyword: "nest-wait",
+		cells: ['await spawn("grandchild", "slow", mode="review")', { wait: { names: ["grandchild"], policy: "all" } }],
+	},
+	{
+		keyword: "nest-hold",
+		cells: ['await spawn("grandchild", "doze", mode="review")', { wait: { names: ["grandchild"], policy: "all" } }],
+	},
 	{
 		keyword: "nest-deeper",
 		cells: [

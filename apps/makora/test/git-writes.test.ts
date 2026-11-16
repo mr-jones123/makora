@@ -50,6 +50,23 @@ describe("git writes", () => {
 		assert.ok(events.indexOf("c start") < events.indexOf("a end"), events.join(", "));
 	});
 
+	it("run a repository's writes in the order they were called, whichever worktree each comes from", async () => {
+		const { repo, linked } = repository();
+		const writes = new GitWrites();
+		const order: number[] = [];
+		await Promise.all(
+			Array.from({ length: 12 }, (_, index) =>
+				writes.run(index % 2 === 0 ? repo : linked, async () => {
+					order.push(index);
+				}),
+			),
+		);
+		assert.deepEqual(
+			order,
+			Array.from({ length: 12 }, (_, index) => index),
+		);
+	});
+
 	it("go on after a write that failed", async () => {
 		const { repo } = repository();
 		const writes = new GitWrites();

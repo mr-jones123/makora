@@ -177,3 +177,15 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   fit, rows past the screen were cut off. The list keeps the title of the section at its top on screen and counts the
   rows above and below as `↑ N more` and `↓ N more`; under 100 columns it takes at most half the screen so the
   inspector stays readable.
+- **A child waiting on its own children holds no running slot (2026-11-16).** A child kept its slot through
+  `wait_agents` and `collect`, so children waiting on grandchildren could hold every slot while the grandchildren
+  queued behind them: 4 children each waiting on a grandchild deadlocked the default `agents.maxRunning` of 4, and one
+  did at 1. The wait now frees the slot in the commit that parks it. Once the wait is over it claims a slot again
+  before it returns, in a lane served before first and woken runs, so new spawns cannot starve a parent; how the wait
+  ended is kept in its checkpoint while it waits. The commit that signals the end of the wait (a finishing child's
+  `notify`, a `send`) already puts the parent in that lane, because the finishing child gives back its slot right after
+  and the woken call usually claims later. The slot and every claim count against the child's anchor, whose
+  `release` drops both, so a stop, removal or crash while waiting leaks no slot. `makora.agent-slots` is version 2
+  (claims with the key their grant signals, and the `resuming` lane); compatibility was not kept, so reading a stored
+  version 1 fails. Each queued anchor now sleeps on `slot-<round>`: the shared `slot` key served one wait, so an anchor
+  that queued for its first run could not queue again once woken.

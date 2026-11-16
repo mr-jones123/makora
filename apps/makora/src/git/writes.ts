@@ -13,13 +13,18 @@ export class GitWrites {
 	// The newest queued write per repository; an entry goes once its write settles with nothing queued after it, so the
 	// map holds only repositories with writes in flight.
 	readonly #tails = new Map<string, Promise<void>>();
+	// Repository lookups run one after another, so writes join their queue in call order: a remove called after a commit
+	// runs after it even when its lookup would have finished first.
+	#lookups: Promise<unknown> = Promise.resolve();
 
 	/** Run `work` once every write queued before it for the repository holding `path` has settled. */
 	async run<T>(path: string, work: () => Promise<T>): Promise<T> {
 		// A path that is gone keys itself: no other write can reach a worktree that no longer exists.
-		const key = await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(() =>
-			resolve(path),
+		const lookup = this.#lookups.then(() =>
+			git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(() => resolve(path)),
 		);
+		this.#lookups = lookup;
+		const key = await lookup;
 		const result = (this.#tails.get(key) ?? Promise.resolve()).then(work);
 		const tail = result.then(
 			() => undefined,
