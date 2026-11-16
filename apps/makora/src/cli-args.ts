@@ -1,6 +1,6 @@
 // The makora command line, parsed into one tagged command.
 import type { ModelRef } from "@earendil-works/pi-durable";
-import { parseModelRef } from "./app.ts";
+import { parseModelRef } from "./models.ts";
 
 /** Which session a run opens. */
 export type SessionChoice =

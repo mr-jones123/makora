@@ -1,10 +1,11 @@
 // User settings in `<home>/settings.json`: the default model, thinking level, REPL snapshots, subagent worktrees and
-// limits, and the worktree setup commands the user approved. Read through getters at each use, so an edit by
-// `/model`, `/thinking`, or another process applies without a restart.
+// limits, the worktree setup commands the user approved, and the pstack model roles. Read through getters at each use,
+// so an edit by `/model`, `/thinking`, `/pstack`, or another process applies without a restart.
 import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
 import type { HarnessSettings, ModelRef } from "@earendil-works/pi-durable";
+import { type PstackConfig, type PstackSettings, parsePstack, pstackConfig, pstackSettings } from "./pstack.ts";
 
 /** The contents of `settings.json`. */
 export interface MakoraSettings {
@@ -22,6 +23,8 @@ export interface MakoraSettings {
 		/** The worktree setup commands the user let run, each for one repository. */
 		readonly approvedSetups?: readonly SetupApproval[];
 	};
+	/** The pstack tiers, budget and roles that differ from the defaults. */
+	readonly pstack?: PstackSettings;
 }
 
 /** A repository's worktree setup command the user approved: the repository's top level and the command's SHA-256. */
@@ -35,12 +38,18 @@ export interface SettingsFile {
 	readonly worktrees: { readonly review?: string; readonly write?: string };
 	readonly maxRunningAgents: number;
 	readonly setupTimeoutMinutes: number;
+	/** The pstack choices in effect, defaults filled in. */
+	readonly pstack: PstackConfig;
+	/** What parsing the file dropped, one message each; empty when nothing was. */
+	readonly warnings: readonly string[];
 	/** Whether the user approved `approval`'s command for its repository. */
 	setupApproved(approval: SetupApproval): boolean;
 	/** Write `change` over the current file; `undefined` fields stay as they are. */
 	update(change: MakoraSettings): void;
 	/** Add `approval` to the approved setup commands, unless it is there. */
 	approveSetup(approval: SetupApproval): void;
+	/** Store `config` as the pstack choices: what differs from the defaults, or no `pstack` field when nothing does. */
+	setPstack(config: PstackConfig): void;
 	/** Harness run policy, read live from this file. */
 	readonly harness: HarnessSettings;
 }
@@ -50,29 +59,32 @@ const DEFAULT_SETUP_TIMEOUT_MINUTES = 10;
 
 /** A live view of the settings file at `file`; a missing or unreadable file reads as empty settings. */
 export function openSettings(file: string): SettingsFile {
-	let cached: { mtimeMs: number; value: MakoraSettings } | undefined;
-	const current = (): MakoraSettings => {
+	let cached: ({ mtimeMs: number } & ParsedSettings) | undefined;
+	const parsed = (): ParsedSettings => {
 		let mtimeMs: number;
 		try {
 			mtimeMs = statSync(file).mtimeMs;
 		} catch {
-			return {};
+			return { value: {}, warnings: [] };
 		}
-		if (cached?.mtimeMs !== mtimeMs) cached = { mtimeMs, value: parseSettings(readJson(file)) };
-		return cached.value;
+		if (cached?.mtimeMs !== mtimeMs) cached = { mtimeMs, ...parseSettings(readJson(file)) };
+		return cached;
 	};
+	const current = (): MakoraSettings => parsed().value;
 	const harness: HarnessSettings = {
 		retry: { maxRetries: 3 },
 		compaction: { enabled: true },
 		toolExecution: "parallel",
 	};
-	const update = (change: MakoraSettings): void => {
-		const defined = Object.entries(change).filter(([, value]) => value !== undefined);
-		const next = { ...current(), ...Object.fromEntries(defined) };
+	const write = (next: MakoraSettings): void => {
 		const temporary = `${file}.${process.pid}.tmp`;
 		writeFileSync(temporary, `${JSON.stringify(next, null, "\t")}\n`);
 		renameSync(temporary, file);
 		cached = undefined;
+	};
+	const update = (change: MakoraSettings): void => {
+		const defined = Object.entries(change).filter(([, value]) => value !== undefined);
+		write({ ...current(), ...Object.fromEntries(defined) });
 	};
 	const setupApproved = ({ repository, sha256 }: SetupApproval): boolean =>
 		(current().agents?.approvedSetups ?? []).some((each) => each.repository === repository && each.sha256 === sha256);
@@ -95,12 +107,23 @@ export function openSettings(file: string): SettingsFile {
 		get setupTimeoutMinutes() {
 			return current().agents?.setupTimeoutMinutes ?? DEFAULT_SETUP_TIMEOUT_MINUTES;
 		},
+		get pstack() {
+			return pstackConfig(current().pstack);
+		},
+		get warnings() {
+			return parsed().warnings;
+		},
 		setupApproved,
 		update,
 		approveSetup(approval) {
 			if (setupApproved(approval)) return;
 			const agents = current().agents;
 			update({ agents: { ...agents, approvedSetups: [...(agents?.approvedSetups ?? []), approval] } });
+		},
+		setPstack(config) {
+			const { pstack: _, ...rest } = current();
+			const pstack = pstackSettings(config);
+			write(pstack === undefined ? rest : { ...rest, pstack });
 		},
 		harness,
 	};
@@ -114,10 +137,13 @@ function readJson(file: string): unknown {
 	}
 }
 
+/** The settings read from the file, and what parsing dropped. */
+type ParsedSettings = { readonly value: MakoraSettings; readonly warnings: readonly string[] };
+
 // `settings.json` is user-edited: the trust boundary of settings.
-function parseSettings(raw: unknown): MakoraSettings {
-	if (typeof raw !== "object" || raw === null) return {};
-	const { model, thinkingLevel, snapshots, worktrees, agents } = raw as Record<string, unknown>;
+function parseSettings(raw: unknown): ParsedSettings {
+	if (typeof raw !== "object" || raw === null) return { value: {}, warnings: [] };
+	const { model, thinkingLevel, snapshots, worktrees, agents, pstack } = raw as Record<string, unknown>;
 	const settings: {
 		-readonly [Key in keyof MakoraSettings]: MakoraSettings[Key];
 	} = {};
@@ -136,7 +162,10 @@ function parseSettings(raw: unknown): MakoraSettings {
 		};
 	}
 	if (typeof agents === "object" && agents !== null) settings.agents = parseAgents(agents as Record<string, unknown>);
-	return settings;
+	if (pstack === undefined) return { value: settings, warnings: [] };
+	const parsedPstack = parsePstack(pstack);
+	settings.pstack = parsedPstack.settings;
+	return { value: settings, warnings: parsedPstack.warnings };
 }
 
 function parseAgents(raw: Record<string, unknown>): NonNullable<MakoraSettings["agents"]> {

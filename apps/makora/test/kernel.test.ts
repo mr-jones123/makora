@@ -175,6 +175,17 @@ describe("kernel protocol", () => {
 		assert.ok(kernel.dead);
 	});
 
+	it("reports a kernel that died before makora saw its exit as died, not as a write error", async () => {
+		const kernel = await start();
+		kernel.kill();
+		// Block the event loop past the SIGKILL, so the process is gone but its exit event has not been handled: the
+		// request's write then finds the pipe closed (EPIPE).
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+		assert.equal(kernel.dead, false, "makora has not seen the exit yet");
+		const outcome = await kernel.snapshot(join(home, "blobs"), undefined, 1_000_000);
+		assert.equal(outcome.kind, "died");
+	});
+
 	it("answers helper calls through the host", async () => {
 		const kernel = await start();
 		const requests: HostRequest[] = [];

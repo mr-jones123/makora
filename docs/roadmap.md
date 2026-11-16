@@ -118,6 +118,11 @@ Delivered in `apps/makora`, verified with the fake model in `test/agents.test.ts
   (`scripts/tmux-dashboard-scroll.sh`).
 - The preamble and the skills adapter: `Task` maps to `spawn`, read-only seats to `review` children, cloud agents to
   `write` children.
+- pstack model roles: `code` and `judge` tiers, each a model and a thinking level, every pstack role mapped to a tier
+  or the session model, chosen in the `/pstack` picker (also opened by `/skill:setup-pstack`) and saved under
+  `pstack` in `settings.json`; `spawn(model="code" | "judge")` resolves host-side, and the prompt lists the roles per
+  tier ([features/skills.md](features/skills.md#pstack-model-roles); `test/pstack.test.ts`, `test/agents.test.ts`,
+  `scripts/tmux-pstack.sh`).
 
 Open items of phase 3:
 
@@ -125,7 +130,6 @@ Open items of phase 3:
 | --- | --- |
 | Re-adding a missing worktree does not rerun the setup command | Rerun it, or record that it ran in the worktree |
 | The cost limit is checked after each tool round, so one long response can pass it | Usage during a generation |
-| pstack model roles as a makora setting | A setting per role, read by the adapter |
 | `interrogate` and `swarm` with real subagents | A run on a real model |
 | A live view of a running agent inside the dashboard | Key routing to a second scrolling area in pi-tui |
 | Kernel startup cost per subagent | A measurement with 4 children |

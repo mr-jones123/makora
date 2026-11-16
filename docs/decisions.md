@@ -189,3 +189,14 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   (claims with the key their grant signals, and the `resuming` lane); compatibility was not kept, so reading a stored
   version 1 fails. Each queued anchor now sleeps on `slot-<round>`: the shared `slot` key served one wait, so an anchor
   that queued for its first run could not queue again once woken.
+- **pstack's model roles are two tiers, chosen in `/pstack` (2026-11-16, replaces "Makora has no model roles").**
+  pstack names a model per role (17 roles in setup-pstack), but its slugs are Cursor's, and a model per role is more
+  choice than a user makes well. Makora keeps two tiers, `code` and `judge`, each a model and a thinking level, and maps
+  each role to a tier or to the session model; a panel role maps each seat. They live under `pstack` in
+  `settings.json`, which stores only what differs from the defaults: with nothing set both tiers are the session model,
+  which is the behavior before tiers. `spawn(model="code" | "judge")` resolves host-side at each spawn, so the record
+  and the dashboard show the real model, a settings change applies to the next child, and the model never sees a slug
+  it could misspell. A tier whose model lost its credentials falls back to the session model with a notice rather than
+  failing the spawn. The prompt lists the roles per tier in a few lines while `poteto-mode` is among the skills, and says
+  so when both tiers are one model, because seats on one model are not multi-model evidence. `/skill:setup-pstack`
+  opens the picker instead of submitting the skill, whose steps write a Cursor rule makora never reads.

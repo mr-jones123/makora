@@ -643,6 +643,63 @@ describe("subagents", () => {
 	});
 });
 
+describe("subagents on pstack tiers", () => {
+	it('run a child spawned with model="judge" on the judge tier\'s model and thinking level, and "code" on the session model', async () => {
+		const where = workspace({
+			pstack: {
+				models: { judge: { model: "faux/faux-2", thinking: "low" } },
+				roles: { "bug-fix": "judge", "no such role": "code" },
+			},
+		});
+		const session = await open(where);
+		try {
+			assert.ok(
+				session.notices.some((notice) => notice.message.includes('"no such role"')),
+				"the unknown role is reported when the session opens",
+			);
+			const output = await cell(
+				session.root,
+				[
+					'await spawn("judged", "review", mode="review", model="judge")',
+					'await spawn("coded", "review", mode="review", model="code")',
+					guarded('await spawn("bogus", "review", mode="review", model="reviewer")'),
+				].join("\n"),
+			);
+			const children = await settled(session, session.root, ["judged", "coded"]);
+			assert.equal(children.bogus, undefined, "an unknown alias starts no child");
+			assert.deepEqual(
+				children.judged!.model,
+				{ provider: "faux", modelId: "faux-2" },
+				"the record keeps the model",
+			);
+			assert.equal(children.coded!.model, undefined, "a session-model tier copies the parent's model");
+
+			const ran = async (record: AgentRecord) => {
+				const child = (await session.harness.conversation(record.conversationId, context))!;
+				const agent = await child.agent(context);
+				const page = await child.entries({}, 50, undefined, context);
+				const answer = page.items.map((entry) => entry.model?.[0]).find((message) => message?.role === "assistant");
+				return {
+					model: agent.model?.modelId,
+					thinking: agent.thinkingLevel,
+					answeredBy: answer?.role === "assistant" ? answer.model : undefined,
+				};
+			};
+			assert.deepEqual(await ran(children.judged!), { model: "faux-2", thinking: "low", answeredBy: "faux-2" });
+			const parent = await session.root.agent(context);
+			assert.notEqual(parent.thinkingLevel, "low");
+			assert.deepEqual(await ran(children.coded!), {
+				model: "faux-1",
+				thinking: parent.thinkingLevel,
+				answeredBy: "faux-1",
+			});
+			assert.match(output, /error: Unknown model alias reviewer/);
+		} finally {
+			await session.close();
+		}
+	});
+});
+
 describe("subagents waiting on their own children", () => {
 	it("give a waiting child's slot to its grandchild, then back to the child ahead of a child not started yet", async () => {
 		const where = workspace({ agents: { maxRunning: 1 } });

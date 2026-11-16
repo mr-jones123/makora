@@ -68,9 +68,10 @@ a background service.
 | `worktrees.ts` | The git worktrees forks and subagents share: the repository's directory name, the path, adding and removing |
 | `agents/` | Subagents: `types.ts` (the record contract), `docs.ts` (documents and signals), `spawn.ts`, `anchor.ts` (the task that drives one child), `worktree.ts` (placement, setup command, committing a write child's work), `control.ts` (merge, stop, remove), `wait.ts` (`wait_agents`, `collect`), `messaging.ts` (`send`), `family.ts` (identity, family, admitting an input), `read.ts` (`agents.*`), `prompts.ts` (the brief, `<agent_result>`, `<agent_message>`), `budget.ts` (the cost stop), `extension.ts` (the `makora-agents` extension); see [subagents.md](subagents.md) |
 | `usage.ts` | A conversation's or session's total cost from `pi.usage` |
-| `settings.ts` | `settings.json`, read live (model, thinking level, `snapshots`, subagent worktree roots, `agents.maxRunning`); the harness run policy |
-| `models.ts` | Built-in providers plus the scripted fake provider and its `FAKE_SCRIPTS` |
-| `extension.ts` | The `makora` Durable extension: the REPL and subagents preamble, cwd, context files, skills |
+| `settings.ts` | `settings.json`, read live (model, thinking level, `snapshots`, subagent worktree roots, `agents.maxRunning`, `pstack`) with the warnings parsing it left; the harness run policy |
+| `pstack.ts` | pstack model roles: the `code` and `judge` tiers, the role table, the `pstack` block of `settings.json` (parse, defaults, what to store), budgets and thinking clamps, `spawnModel` (what `model="code" \| "judge" \| "provider/id"` runs on), the prompt's role lines |
+| `models.ts` | Built-in providers plus the scripted fake provider (`faux-1`, `faux-2`) and its `FAKE_SCRIPTS`; `parseModelRef` |
+| `extension.ts` | The `makora` Durable extension: the REPL and subagents preamble, cwd, context files, skills and the pstack role lines |
 | `kernel/` | `python-env.ts` (the shared venv), `protocol.ts` (the kernel wire protocol), `kernel.ts` (one kernel process), `manager.ts` (kernels per conversation, status, pid files); see [repl.md](repl.md) |
 | `repl/` | `python-tool.ts`, `llm-tool.ts`, `history.ts`, `git-tree.ts`, `details.ts`, `extension.ts` (the `makora-repl` extension); see [repl.md](repl.md) |
 | `git/` | `repo.ts` (runs git), `diff.ts` (the diff parser), `log.ts` (the log parser) for the diff view, see [tui.md](tui.md#the-diff-view); `writes.ts` (makora's git writes, one at a time per repository, see [subagents.md](subagents.md#worktrees-and-roots)) |
@@ -85,7 +86,8 @@ a background service.
 
 Other parts of `apps/makora`: `bin/makora.mjs` (launcher), `python/makora_rlm/` (the kernel's Python package:
 `kernel.py`, `snapshot.py`, `helpers.py`, `protocol.py`), `scripts/sync-skills.mjs`, `scripts/tmux-agents.sh` and
-`scripts/tmux-dashboard.sh` and `scripts/tmux-dashboard-scroll.sh` (tmux checks of subagents and the dashboard), `skills/` (generated),
+`scripts/tmux-dashboard.sh` and `scripts/tmux-dashboard-scroll.sh` (tmux checks of subagents and the dashboard),
+`scripts/tmux-pstack.sh` (tmux check of the `/pstack` picker), `skills/` (generated),
 `skills-src/` (overlays), `skills.lock.json`, `test/`.
 
 ## Files on disk

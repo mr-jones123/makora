@@ -2,17 +2,34 @@
 import { spawn } from "node:child_process";
 import { dirname } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
+import {
+	type Api,
+	type AuthInteraction,
+	type AuthPrompt,
+	getSupportedThinkingLevels,
+	type Model,
+} from "@earendil-works/pi-ai";
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
-import type { ConversationId } from "@earendil-works/pi-durable";
-import type { SlashCommand } from "@earendil-works/pi-tui";
+import type { ConversationId, ModelRef } from "@earendil-works/pi-durable";
+import type { SelectItem, SlashCommand } from "@earendil-works/pi-tui";
 import type { MakoraApp } from "../app.ts";
 import { loginAccount } from "../auth/login.ts";
 import { createFork, forkPoints } from "../fork.ts";
 import { tildify } from "../paths.ts";
+import {
+	BUDGETS,
+	type Budget,
+	clampThinking,
+	type PstackConfig,
+	pstackSettings,
+	TIERS,
+	type Tier,
+	type TierModel,
+} from "../pstack.ts";
 import { listSessions, type SessionMeta } from "../sessions.ts";
 import { readSkillBody, type Skill } from "../skills.ts";
 import type { Dialogs } from "./dialogs.ts";
+import { PICKER_HEIGHT_PERCENT, PICKER_MIN_WIDTH, PstackPicker } from "./pstack-picker.ts";
 import type { SessionFeed } from "./session-feed.ts";
 
 /** What commands can do to the TUI. */
@@ -50,6 +67,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 	logout: { description: "Remove a provider's active account", run: logout },
 	model: { description: "Choose the model", run: chooseModel },
 	thinking: { description: "Choose the thinking level", run: chooseThinking },
+	pstack: { description: "Choose the models and thinking levels of pstack's roles", run: pstack },
 	new: { description: "Start a new session in this directory", run: (host) => host.switchSession(undefined) },
 	resume: { description: "Resume another session", run: resume },
 	fork: { description: "Fork the conversation before an earlier message, with its variables and files", run: fork },
@@ -67,18 +85,27 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 	quit: { description: "Exit makora", run: async (host) => host.exit() },
 };
 
+// Skills makora answers with its own command: setup-pstack writes a Cursor rule makora never reads, and /pstack is
+// where makora keeps those choices.
+const SKILL_COMMANDS: Readonly<Record<string, string>> = { "setup-pstack": "pstack" };
+
 /** The commands and `skill:<name>` entries for the editor's autocomplete. */
 export function slashCommands(skills: readonly Skill[]): SlashCommand[] {
 	return [
 		...Object.entries(COMMANDS).map(([name, command]) => ({ name, description: command.description })),
-		...skills.map((skill) => ({
-			name: `skill:${skill.name}`,
-			description:
-				skill.hides.length === 0
-					? skill.description
-					: `(hides ${skill.hides.map((path) => tildify(dirname(path))).join(", ")}) ${skill.description}`,
-			argumentHint: "[args]",
-		})),
+		...skills.map((skill) => {
+			const command = SKILL_COMMANDS[skill.name];
+			const description =
+				command === undefined ? skill.description : `Opens /${command}: ${COMMANDS[command]!.description}`;
+			return {
+				name: `skill:${skill.name}`,
+				description:
+					skill.hides.length === 0
+						? description
+						: `(hides ${skill.hides.map((path) => tildify(dirname(path))).join(", ")}) ${description}`,
+				argumentHint: "[args]",
+			};
+		}),
 	];
 }
 
@@ -87,6 +114,8 @@ export async function runCommand(host: CommandHost, text: string, skills: readon
 	const [name = "", ...rest] = text.slice(1).split(/\s+/);
 	const args = rest.join(" ").trim();
 	if (name.startsWith("skill:")) {
+		const command = SKILL_COMMANDS[name.slice("skill:".length)];
+		if (command !== undefined) return COMMANDS[command]!.run(host, args);
 		const skill = skills.find((candidate) => candidate.name === name.slice("skill:".length));
 		if (skill === undefined) return host.notice(`No skill named ${name.slice("skill:".length)}.`);
 		const body = `<skill name="${skill.name}" location="${skill.path}">\n${readSkillBody(skill)}\n</skill>`;
@@ -241,15 +270,7 @@ async function logout(host: CommandHost): Promise<void> {
 async function chooseModel(host: CommandHost): Promise<void> {
 	const available = await host.app.models.getAvailable();
 	if (available.length === 0) return host.info("No provider has credentials. Use /login first.");
-	const current = host.feed().state.model;
-	const choice = await host.dialogs.select(
-		"Model",
-		available.map((model) => ({
-			value: `${model.provider}/${model.id}`,
-			label: `${current?.provider === model.provider && current.modelId === model.id ? "● " : "  "}${model.provider}/${model.id}`,
-			description: model.name,
-		})),
-	);
+	const choice = await host.dialogs.select("Model", modelItems(available, host.feed().state.model));
 	if (choice === undefined) return;
 	const model = available.find((candidate) => `${candidate.provider}/${candidate.id}` === choice.value)!;
 	const ref = { provider: model.provider, modelId: model.id };
@@ -258,6 +279,107 @@ async function chooseModel(host: CommandHost): Promise<void> {
 	await feed.session.setModel(feed.conversation, ref, BACKGROUND_CONTEXT);
 	host.info(`Model: ${choice.value}`);
 	host.refreshStatus();
+}
+
+/** One item per model in `available`, `current` marked. */
+function modelItems(available: readonly Model<Api>[], current: ModelRef | undefined): SelectItem[] {
+	return available.map((model) => ({
+		value: `${model.provider}/${model.id}`,
+		label: `${current?.provider === model.provider && current.modelId === model.id ? "● " : "  "}${model.provider}/${model.id}`,
+		description: model.name,
+	}));
+}
+
+/** Open the pstack picker over the saved choices, and save what it hands back. */
+async function pstack(host: CommandHost): Promise<void> {
+	const { models, settings } = host.app;
+	const available = await models.getAvailable();
+	const usable = new Set(available.map((model) => `${model.provider}/${model.id}`));
+	const before = settings.pstack;
+	const config = await host.dialogs.show<PstackConfig>(
+		(finish) =>
+			new PstackPicker(
+				before,
+				{
+					chooseModel: (tier, current, budget) => chooseTierModel(host, available, tier, current, budget),
+					chooseBudget: async (current) => {
+						const choice = await host.dialogs.select(
+							"Budget: the thinking level of both tiers",
+							Object.entries(BUDGETS).map(([budget, level]) => ({
+								value: budget,
+								label: `${budget === current ? "● " : "  "}${budget} (${level})`,
+							})),
+						);
+						return Object.keys(BUDGETS).find((budget): budget is Budget => budget === choice?.value);
+					},
+					confirmReset: async () =>
+						(
+							await host.dialogs.select("Reset pstack to the defaults?", [
+								{
+									value: "reset",
+									label: "Reset",
+									description: "both tiers on the session model, every role on its default",
+								},
+								{ value: "cancel", label: "Cancel" },
+							])
+						)?.value === "reset",
+					lookup: (ref) => models.getModel(ref.provider, ref.modelId),
+					usable: (ref) => usable.has(`${ref.provider}/${ref.modelId}`),
+					rows: () => host.dialogs.rows,
+					render: () => host.dialogs.render(),
+				},
+				finish,
+			),
+		{ width: "80%", minWidth: PICKER_MIN_WIDTH, maxHeight: `${PICKER_HEIGHT_PERCENT}%`, anchor: "center" },
+	);
+	if (config === undefined) return;
+	if (JSON.stringify(pstackSettings(config)) === JSON.stringify(pstackSettings(before))) {
+		return host.info("pstack: nothing changed.");
+	}
+	settings.setPstack(config);
+	const tier = (each: Tier) => {
+		const chosen = config.models[each];
+		return `${each} ${chosen === "session" ? "session model" : `${chosen.model.provider}/${chosen.model.modelId} (${chosen.thinking})`}`;
+	};
+	host.info(`pstack saved: ${TIERS.map(tier).join(", ")}, budget ${config.budget}. New subagents use it.`);
+}
+
+/**
+ * Ask for a tier's model among the session model and the models with credentials, then for its thinking level when
+ * the model thinks; the budget's level, clamped to the model, is the answer when that question is cancelled.
+ */
+async function chooseTierModel(
+	host: CommandHost,
+	available: readonly Model<Api>[],
+	tier: Tier,
+	current: TierModel,
+	budget: Budget,
+): Promise<TierModel | undefined> {
+	const session: SelectItem = {
+		value: "session",
+		label: `${current === "session" ? "● " : "  "}session model`,
+		description: "the model the spawning conversation runs on",
+	};
+	const choice = await host.dialogs.select(`${tier} model`, [
+		session,
+		...modelItems(available, current === "session" ? undefined : current.model),
+	]);
+	if (choice === undefined) return undefined;
+	if (choice.value === "session") return "session";
+	const model = available.find((candidate) => `${candidate.provider}/${candidate.id}` === choice.value)!;
+	const ref = { provider: model.provider, modelId: model.id };
+	const fallback = clampThinking(model, BUDGETS[budget]);
+	const levels = getSupportedThinkingLevels(model);
+	if (levels.length === 1) return { model: ref, thinking: fallback };
+	const level = await host.dialogs.select(
+		`${tier} thinking level`,
+		levels.map((each) => ({
+			value: each,
+			label: `${each === fallback ? "● " : "  "}${each}`,
+			...(each === fallback ? { description: `budget ${budget}` } : {}),
+		})),
+	);
+	return { model: ref, thinking: levels.find((each) => each === level?.value) ?? fallback };
 }
 
 async function chooseThinking(host: CommandHost, args: string): Promise<void> {

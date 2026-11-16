@@ -51,10 +51,3 @@ export async function defaultModel(app: MakoraApp): Promise<ModelRef | undefined
 	const model = available.find((candidate) => candidate.provider === "anthropic") ?? available[0];
 	return model === undefined ? undefined : { provider: model.provider, modelId: model.id };
 }
-
-/** Parse a `provider/modelId` reference, as `--model` and `meta.json` write it. */
-export function parseModelRef(text: string): ModelRef | undefined {
-	const slash = text.indexOf("/");
-	if (slash <= 0 || slash === text.length - 1) return undefined;
-	return { provider: text.slice(0, slash), modelId: text.slice(slash + 1) };
-}

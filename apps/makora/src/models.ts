@@ -17,14 +17,23 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import type { ModelRef } from "@earendil-works/pi-durable";
 
-/** The fake provider's only model. */
+/** The fake provider's default model. */
 export const FAKE_MODEL: ModelRef = { provider: "faux", modelId: "faux-1" };
+/** The fake provider's second model, so tests and demos can run a tier or a subagent on a model the session is not on. */
+export const SECOND_FAKE_MODEL: ModelRef = { provider: "faux", modelId: "faux-2" };
 
 /** The built-in providers reading credentials from `credentials`, plus the fake provider when `fake`. */
 export function createMakoraModels(credentials: CredentialStore, fake: boolean): MutableModels {
 	const models = builtinModels({ credentials });
 	if (fake) addFakeProvider(models);
 	return models;
+}
+
+/** Parse a `provider/modelId` reference, as `--model`, `spawn`, `llm` and `meta.json` write it. */
+export function parseModelRef(text: string): ModelRef | undefined {
+	const slash = text.indexOf("/");
+	if (slash <= 0 || slash === text.length - 1) return undefined;
+	return { provider: text.slice(0, slash), modelId: text.slice(slash + 1) };
 }
 
 /** A `wait_agents` call in a fake script. */
@@ -170,16 +179,14 @@ export const FAKE_SCRIPTS: readonly { readonly keyword: string; readonly cells: 
 function addFakeProvider(models: MutableModels): void {
 	const faux = fauxProvider({
 		api: "makora-faux",
-		models: [
-			{
-				id: FAKE_MODEL.modelId,
-				name: "Faux",
-				reasoning: true,
-				cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-				contextWindow: 200_000,
-				maxTokens: 16_384,
-			},
-		],
+		models: [FAKE_MODEL, SECOND_FAKE_MODEL].map((model, index) => ({
+			id: model.modelId,
+			name: index === 0 ? "Faux" : `Faux ${index + 1}`,
+			reasoning: true,
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+			contextWindow: 200_000,
+			maxTokens: 16_384,
+		})),
 		tokensPerSecond: 120,
 	});
 	models.setProvider({

@@ -129,6 +129,7 @@ async function open(
 		notices.push(notice);
 		for (const listener of listeners) listener(notice);
 	};
+	for (const warning of app.settings.warnings) notify(warning);
 	const dir = store.kind === "persistent" ? sessionDir(store.sessionsDir, meta.id) : undefined;
 	const gitWrites = new GitWrites();
 	let kernels: KernelManager;
@@ -141,7 +142,7 @@ async function open(
 		repl = createRepl({ kernels, snapshots: snapshotPolicy(app, meta, dir), defaultCwd: meta.cwd });
 		const registry = createRegistry();
 		registry.install(CodingTools);
-		registry.install(makoraExtension(app.paths));
+		registry.install(makoraExtension(app.paths, () => app.settings.pstack));
 		registry.install(repl.extension);
 		agents = createAgents({
 			kernels,
@@ -152,6 +153,8 @@ async function open(
 			maxRunning: () => app.settings.maxRunningAgents,
 			setup: setupPolicy(app, options),
 			settingsFile: app.paths.settings,
+			pstack: () => app.settings.pstack,
+			notify,
 		});
 		registry.install(agents.extension);
 		const storage: Storage =

@@ -13,7 +13,7 @@
 
 | File | Written by | Format |
 | --- | --- | --- |
-| `settings.json` | `/model`, `/thinking`, or you | `{ "model": { "provider": "anthropic", "modelId": "…" }, "thinkingLevel": "high", "snapshots": true, "worktrees": { "review": "…", "write": "…" }, "agents": { "maxRunning": 4, "setupTimeoutMinutes": 10, "approvedSetups": [{ "repository": "…", "sha256": "…" }] } }` |
+| `settings.json` | `/model`, `/thinking`, `/pstack`, or you | `{ "model": { "provider": "anthropic", "modelId": "…" }, "thinkingLevel": "high", "snapshots": true, "worktrees": { "review": "…", "write": "…" }, "agents": { "maxRunning": 4, "setupTimeoutMinutes": 10, "approvedSetups": [{ "repository": "…", "sha256": "…" }] }, "pstack": { "budget": "large", "models": { "code": { "model": "provider/modelId", "thinking": "xhigh" }, "judge": "session" }, "roles": { "bug-fix": "judge", "arena runners": ["judge", "code"] } } }` |
 | `keybindings.json` | You | `{ "<binding id>": "<key>" or ["<key>", …] }` |
 | `auth.json` | `/login`, `/accounts`, `/logout`, token refresh | See [architecture/auth.md](../architecture/auth.md); mode 0600, do not edit while makora runs |
 | `AGENTS.md` | You | Markdown instructions added to every conversation's prompt, before project AGENTS.md files |
@@ -34,9 +34,14 @@
 | `agents.maxRunning` | `4` | Subagents running at once per session; more wait as `queued`. A whole number of at least 1; read when an agent asks for a slot |
 | `agents.setupTimeoutMinutes` | `10` | How long a repository's `worktreeSetup` may run before it is killed and its child stopped; a positive number, read at each run |
 | `agents.approvedSetups` | none | The `worktreeSetup` commands you let run, as `{ "repository": "<top level>", "sha256": "<hex SHA-256 of the command>" }`. The TUI adds one when you approve a command; a command not listed is skipped ([features/subagents.md](../features/subagents.md#the-setup-command-is-code-from-the-repository)) |
+| `pstack.models.code`, `pstack.models.judge` | `"session"` | A pstack tier: `"session"` (the spawning conversation's model), or `{ "model": "provider/modelId", "thinking": "<level>" }`. `spawn(model="code")` and `spawn(model="judge")` run the child on it; a model without credentials falls back to the session model with a notice. Read at each spawn ([features/subagents.md](../features/subagents.md#models)) |
+| `pstack.budget` | `"large"` | `unlimited` (max), `large` (xhigh), `medium` (high) or `small` (medium): the thinking level `/pstack` gives both tiers, clamped to what each model supports |
+| `pstack.roles.<role>` | pstack's split | Where a pstack role runs, by its setup-pstack label (`"bug-fix"`, `"how explainer"`, …): `"code"`, `"judge"` or `"session"`; a panel role (`arena runners`, `arena cross-judge pool`, `architect runners`, `interrogate reviewers`) takes a list, one seat per subagent. Defaults: code roles on `code`, judgment roles on `judge`, panels `["judge", "code"]` ([features/skills.md](../features/skills.md#pstack-model-roles)) |
 
 `settings.json` and `keybindings.json` are read live; a missing or unreadable `settings.json` reads as empty, and
-malformed key bindings are skipped.
+malformed key bindings are skipped. `/pstack` writes only what differs from the defaults, and removes `pstack` when
+nothing does. An unknown pstack role or a malformed `pstack` value is dropped, and each session that opens shows a
+warning naming it.
 
 ## Key binding ids
 
@@ -56,6 +61,13 @@ Makora's own:
 | `app.agents.merge` | `m`; read only in the agents dashboard |
 | `app.agents.stop` | `s`; read only in the agents dashboard |
 | `app.agents.remove` | `x`; read only in the agents dashboard |
+| `app.pstack.budget` | `b`; read only in the `/pstack` picker |
+| `app.pstack.reset` | `r`; read only in the `/pstack` picker |
+| `app.pstack.previousSeat`, `app.pstack.nextSeat` | `left`, `right`; read only while the picker edits a panel's seats |
+| `app.pstack.addSeat`, `app.pstack.removeSeat` | `a`, `x`; read only while the picker edits a panel's seats |
+
+The picker moves, changes and closes with pi-tui's `tui.select.up`, `tui.select.down`, `tui.select.confirm` and
+`tui.select.cancel`.
 
 The diff view's own keys, read only while it is open ([features/diff.md](../features/diff.md)):
 

@@ -16,8 +16,9 @@
 | `list-window.ts` | Which list lines fit the rows the list has: scrolled by the least that keeps the selected row in view, the top section's title kept, `↑ N more` / `↓ N more` for rows cut off |
 | `dashboard.ts` | The dashboard's pure model: `dashboardRows` (sections, indentation, glyph state, mode, branch or ref, budget bar, running cell) and `inspectorLines` |
 | `agent-actions.ts` | What `d`, `m`, `s` and `x` do to the selected agent, with their confirmations, through `src/agents/control.ts` |
-| `dialogs.ts` | Modal selector and text input overlays used by commands and login |
-| `commands.ts` | The slash command table, autocomplete entries, login and account flows, the `/fork` picker |
+| `dialogs.ts` | Modal selector and text input overlays used by commands and login, and `show` for a command's own overlay component |
+| `commands.ts` | The slash command table, autocomplete entries, login and account flows, the `/fork` picker, `/pstack` with its model, thinking, budget and reset dialogs; `/skill:setup-pstack` runs `/pstack` |
+| `pstack-picker.ts` | The `/pstack` overlay: tiers and roles drawn through `list-window.ts`, Enter, the seat editing of panel roles, `b` and `r`; it hands the edited `PstackConfig` back on Esc |
 | `keybindings.ts` | Makora's bindings merged over pi-tui's, plus user overrides |
 | `account-label.ts` | The status row's account label |
 | `rounded-editor.ts` | pi-tui's editor drawn in a rounded box |
@@ -78,7 +79,8 @@ it walks the `APP_KEYS` table (`app.interrupt`, `app.exit`, `app.cancel`, `app.t
 `app.model.select`, `app.diff`); an action returning `false` lets the key through to the editor. `app.back` comes before
 `app.interrupt` and shares its default key: on a fork or subagent it makes the main conversation active again, and on
 the main conversation it returns `false`, so the same key interrupts. The dashboard reads `tui.select.*` and
-`app.agents.diff`, `app.agents.merge`, `app.agents.stop` and `app.agents.remove` itself. Bindings are never
+`app.agents.diff`, `app.agents.merge`, `app.agents.stop` and `app.agents.remove` itself; the `/pstack` picker reads
+`tui.select.*` and the `app.pstack.*` ids. Bindings are never
 matched by literal key strings: `keybindings.ts` declares makora's ids and defaults, merges them over pi-tui's
 `TUI_KEYBINDINGS` in a `KeybindingsManager`, and applies `~/.makora/keybindings.json` (validated; bad entries
 skipped).

@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { GitWrites } from "../git/writes.ts";
 import type { KernelManager } from "../kernel/manager.ts";
+import type { PstackConfig } from "../pstack.ts";
 import { totalCost } from "../usage.ts";
 import { createAnchor } from "./anchor.ts";
 import { CostStop } from "./budget.ts";
@@ -38,6 +39,10 @@ export type AgentsOptions = {
 	readonly setup: SetupPolicy;
 	/** The user's settings file, where setup approvals go. */
 	readonly settingsFile: string;
+	/** The pstack tiers a spawn's `model="code"` or `model="judge"` resolves to, read at each spawn. */
+	readonly pstack: () => PstackConfig;
+	/** Tell the user something about the session. */
+	readonly notify: (message: string) => void;
 };
 
 /** The subagents of one session: their extension, and `wait_agents`, which the model is offered next to `python`. */
@@ -57,6 +62,8 @@ export function createAgents(options: AgentsOptions): Agents {
 		roots: options.roots,
 		defaultCwd: options.defaultCwd,
 		anchor,
+		pstack: options.pstack,
+		notify: options.notify,
 	});
 	const waits = createWaitTools(options.maxRunning);
 	const extension = defineExtension({

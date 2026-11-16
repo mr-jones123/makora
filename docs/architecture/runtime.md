@@ -60,12 +60,14 @@ warm.
 ## Models and settings
 
 - The model of a new session comes from `--model`, else `~/.makora/settings.json`, else the first Anthropic model
-  you have auth for, else the first available model. Fake mode always uses the faux model.
+  you have auth for, else the first available model. Fake mode always uses `faux/faux-1`; its second model,
+  `faux/faux-2`, answers the same scripts and lets tests and demos put a pstack tier or a subagent on another model.
 - `settings.json` is read through getters with an mtime cache, so `/model`, `/thinking` or an edit in another process
   applies to the next request without a restart.
 - `settings.json` also holds `snapshots` (default `true`), read at every cell
   ([repl.md](repl.md#durability-is-optional)), and the subagent settings `worktrees.review`, `worktrees.write` and
-  `agents.maxRunning` ([reference/configuration.md](../reference/configuration.md#settingsjson-fields)).
+  `agents.maxRunning`, and the pstack tiers and roles under `pstack`, read at each spawn and each request's prompt
+  ([reference/configuration.md](../reference/configuration.md#settingsjson-fields)).
 - Fake mode (`--fake` or `MAKORA_FAKE=1`) registers a scripted faux provider. It picks the first script in
   `FAKE_SCRIPTS` (`src/models.ts`) whose keyword the prompt contains, runs its cells as `python` calls, one per turn,
   then summarizes the last result in markdown. A step can also be a `wait_agents` call. A prompt with a fenced

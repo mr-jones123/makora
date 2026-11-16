@@ -37,6 +37,9 @@ await merge("fix-db")                                # write mode only; conflict
 1. `spawn` (`src/agents/spawn.ts`) checks the name, the depth and the model, resolves `ref` or `base` to a commit, and
    in one commit creates the anchor task, the child conversation and the record. The child starts as a copy of the
    parent's agent, with `cwd` set to its worktree, `maxTurns` set to its turn budget, and the model when one was given.
+   `model="code"` and `model="judge"` resolve host-side (`spawnModel` in `src/pstack.ts`) to the tier's model and
+   thinking level from the settings, read at each spawn; a tier on the session model, or one whose model has no
+   credentials (with a session notice), leaves the parent's model in place.
    Calling `spawn` again with a known name returns that child, so a rerun after a crash never starts a second one.
 2. The anchor (`src/agents/anchor.ts`) is a background task owned by the parent conversation, not by the cell. Durable
    aborts the nested calls of a tool call that is not replay-safe when it restarts, and a cell cannot be replay-safe,
@@ -332,7 +335,6 @@ stop and remove, and Enter opens the agent in the main screen. What the user see
 | Re-adding a missing worktree before a later cell | Does not rerun the setup command |
 | Cost limit | Checked after each tool round, so a run's final answer is never cut off and one long response can pass the budget |
 | `agents.list()` | Lists only the caller's children; a child learns its siblings' names from its brief |
-| Model roles (pstack's code and judgment models as a setting) | Not built; `spawn(model=...)` picks a model per child |
 | `interrogate` and `swarm` running real subagents | Not tried end to end |
 | `ctx.get(name)` for child results in a cell | Not built; `agents.get(name)` returns the record |
 | Kernel startup cost per subagent (a process plus a restore) | Not measured |

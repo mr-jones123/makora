@@ -95,6 +95,8 @@ Details of every column and key: [subagents.md](subagents.md#the-dashboard). For
 | m (dashboard) | Merge the selected write subagent | `app.agents.merge` |
 | s (dashboard) | Stop the selected running or queued subagent | `app.agents.stop` |
 | x (dashboard) | Remove the selected subagent with its children, or the selected fork | `app.agents.remove` |
+| b, r (`/pstack`) | Pick the budget; reset to the defaults | `app.pstack.budget`, `app.pstack.reset` |
+| ←/→, a, x (`/pstack`, editing a panel) | Pick a seat; add one; remove one | `app.pstack.previousSeat`, `app.pstack.nextSeat`, `app.pstack.addSeat`, `app.pstack.removeSeat` |
 | Home | Start of the editor line (Ctrl+A is taken by the agents dashboard) | pi-tui editor |
 | PgUp / PgDn, Ctrl+Home / Ctrl+End | Scroll the transcript | pi-tui |
 
@@ -109,6 +111,7 @@ Every binding can be remapped in `~/.makora/keybindings.json` ([reference/config
 | `/logout` | Remove the current provider's active account |
 | `/model` | Choose the model among providers you are logged in to |
 | `/thinking` | Choose the thinking level |
+| `/pstack` | Choose pstack's code and judge models, their thinking budget, and where each pstack role runs; `/skill:setup-pstack` opens it too ([skills.md](skills.md#pstack-model-roles)) |
 | `/new` | Start a new session in this directory |
 | `/resume` | Resume another session |
 | `/fork` | Fork the active conversation before an earlier message, with that point's variables and files ([sessions.md](sessions.md#forks)) |
@@ -118,4 +121,5 @@ Every binding can be remapped in `~/.makora/keybindings.json` ([reference/config
 | `/quit` | Exit |
 
 `/model`, `/thinking` and `/compact` act on the active conversation. The model and thinking choices are also saved in
-`~/.makora/settings.json` as the default for new sessions, and apply to new requests immediately.
+`~/.makora/settings.json` as the default for new sessions, and apply to new requests immediately. `/pstack` saves its
+choices there when you close it with Esc; they apply to the next subagent.

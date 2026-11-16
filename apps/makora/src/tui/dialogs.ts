@@ -1,8 +1,10 @@
-// Modal dialogs over the main screen: a filterable selector and a text field, each resolving a promise.
+// Modal dialogs over the main screen: a filterable selector, a text field, and a component of the caller's, each
+// resolving a promise.
 import {
 	type Component,
 	decodeKittyPrintable,
 	getKeybindings,
+	type OverlayOptions,
 	type SelectItem,
 	SelectList,
 	type TUI,
@@ -49,9 +51,25 @@ export class Dialogs {
 		return this.#show(options.signal, (finish) => new InputDialog(title, options, finish));
 	}
 
+	/** Show the component `create` makes, sized by `layout`, until it calls `finish`. */
+	show<T>(create: (finish: (value: T) => void) => Component, layout: OverlayOptions): Promise<T | undefined> {
+		return this.#show(undefined, create, layout);
+	}
+
+	/** The terminal's rows, for a component that fits itself to the screen. */
+	get rows(): number {
+		return this.#tui.terminal.rows;
+	}
+
+	/** Draw again, after a component changed outside its own input. */
+	render(): void {
+		this.#tui.requestRender();
+	}
+
 	#show<T>(
 		signal: AbortSignal | undefined,
 		create: (finish: (value: T | undefined) => void) => Component,
+		layout: OverlayOptions = { width: "70%", minWidth: 40, maxHeight: "80%", anchor: "center" },
 	): Promise<T | undefined> {
 		if (signal?.aborted) return Promise.resolve(undefined);
 		const { promise, resolve } = Promise.withResolvers<T | undefined>();
@@ -65,23 +83,20 @@ export class Dialogs {
 			resolve(value);
 		};
 		const onAbort = (): void => finish(undefined);
-		const handle = this.#tui.showOverlay(create(finish), {
-			width: "70%",
-			minWidth: 40,
-			maxHeight: "80%",
-			anchor: "center",
-		});
+		const handle = this.#tui.showOverlay(create(finish), layout);
 		signal?.addEventListener("abort", onAbort, { once: true });
 		this.#tui.requestRender();
 		return promise;
 	}
 }
 
-/** A rounded frame with `title` in its top border around `body`, and a hint row. */
-function framed(title: string, body: readonly string[], hint: string, width: number): string[] {
+/** A rounded frame with `title`, and `right` at the end, in its top border around `body`, and a hint row. */
+export function framed(title: string, body: readonly string[], hint: string, width: number, right = ""): string[] {
 	const inner = Math.max(1, width - 4);
 	const label = truncateToWidth(` ${title} `, Math.max(0, width - 4), "…");
-	const top = `${theme.border("╭─")}${theme.bold(theme.accent(label))}${theme.border(`${"─".repeat(Math.max(0, width - 3 - visibleWidth(label)))}╮`)}`;
+	const end = right === "" || visibleWidth(label) + visibleWidth(right) + 6 > width ? "" : ` ${right} `;
+	const fill = "─".repeat(Math.max(0, width - 4 - visibleWidth(label) - visibleWidth(end)));
+	const top = `${theme.border("╭─")}${theme.bold(theme.accent(label))}${theme.border(fill)}${theme.muted(end)}${theme.border("─╮")}`;
 	const row = (text: string) =>
 		`${theme.border("│")} ${truncateToWidth(text, inner, "…")}${" ".repeat(Math.max(0, inner - visibleWidth(text)))} ${theme.border("│")}`;
 	return [top, ...body.map(row), row(""), row(hint), theme.border(`╰${"─".repeat(Math.max(0, width - 2))}╯`)];

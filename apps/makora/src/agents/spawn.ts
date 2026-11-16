@@ -2,7 +2,7 @@
 // returns the child of that name when it exists, so calling it again (after a crash, or by mistake) never duplicates.
 import { configure, defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { int, num, obj, oneOf, opt, str, unknown } from "@earendil-works/pi-schema";
-import { parseModelRef } from "../app.ts";
+import { type PstackConfig, spawnModel } from "../pstack.ts";
 import type { AnchorTask } from "./anchor.ts";
 import { AgentSelfDoc, AgentsDoc, SELF_KEY } from "./docs.ts";
 import { identityOf, ROOT_NAME } from "./family.ts";
@@ -24,7 +24,11 @@ const SpawnParameters = obj({
 	mode: oneOf(["write", "review"] as const),
 	ref: opt(str({ description: "review: the commit to check out; default HEAD" })),
 	base: opt(str({ description: "write: where the child's branch starts; default HEAD" })),
-	model: opt(str({ description: "provider/modelId; default: this conversation's model" })),
+	model: opt(
+		str({
+			description: '"code" or "judge" for a pstack tier, or provider/modelId; default: this conversation\'s model',
+		}),
+	),
 	budget: opt(obj({ usd: opt(num()), minutes: opt(num()), turns: opt(int({ minimum: 1 })) })),
 });
 
@@ -35,6 +39,10 @@ export type SpawnOptions = {
 	/** The cwd of a conversation whose agent sets none. */
 	readonly defaultCwd: string;
 	readonly anchor: AnchorTask;
+	/** The pstack tiers `model="code"` and `model="judge"` resolve to, read at each spawn. */
+	readonly pstack: () => PstackConfig;
+	/** Tell the user something about the session, such as a tier that fell back to the session model. */
+	readonly notify: (message: string) => void;
 };
 
 /** The `spawn` tool; children below `MAX_DEPTH` get it too, the deepest ones do not. */
@@ -62,13 +70,15 @@ export function createSpawnTool(options: SpawnOptions): ToolRegistration<typeof 
 			if (existing !== undefined) return result(existing);
 			const mode: AgentMode = args.mode;
 			const agent = await api.agent(context);
-			const model = args.model === undefined ? undefined : parseModelRef(args.model);
-			if (args.model !== undefined && model === undefined) {
-				throw new Error(`Bad model ${args.model}: use provider/modelId`);
-			}
-			if (model !== undefined && api.models.getModel(model.provider, model.modelId) === undefined) {
-				throw new Error(`Unknown model ${args.model}`);
-			}
+			const available = args.model === undefined ? [] : await api.models.getAvailable();
+			const chosen = spawnModel(args.model, options.pstack(), {
+				exists: (ref) => api.models.getModel(ref.provider, ref.modelId) !== undefined,
+				usable: (ref) => available.some((each) => each.provider === ref.provider && each.id === ref.modelId),
+			});
+			if (chosen.kind === "refused") throw new Error(chosen.reason);
+			if (chosen.kind === "parent" && chosen.notice !== undefined) options.notify(`${args.name}: ${chosen.notice}`);
+			const model = chosen.kind === "model" ? chosen.model : undefined;
+			const thinkingLevel = chosen.kind === "model" ? chosen.thinkingLevel : undefined;
 			const placement = await placeAgent(
 				agent.cwd ?? options.defaultCwd,
 				mode,
@@ -97,6 +107,7 @@ export function createSpawnTool(options: SpawnOptions): ToolRegistration<typeof 
 					cwd: worktree.cwd,
 					maxTurns: budget.turns,
 					...(model === undefined ? {} : { model }),
+					...(thinkingLevel === undefined ? {} : { thinkingLevel }),
 					...(depth < MAX_DEPTH ? {} : { tools: { remove: [tool] } }),
 				});
 				await tx.doc(AgentSelfDoc, child.id, SELF_KEY, {

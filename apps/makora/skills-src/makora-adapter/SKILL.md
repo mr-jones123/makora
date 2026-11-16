@@ -39,18 +39,18 @@ Makora gives you two tools. `python` is a persistent Python REPL whose cells cal
 
 ## Models
 
-Makora has no model roles. Every seat runs on the session model unless the step needs an independent model: then pass `model="provider/modelId"` to `spawn`, with a model the session has credentials for (`/model` lists them).
+Makora has two model tiers, `code` and `judge`. Each is a model and a thinking level the user picks in `/pstack`, or the session model. `spawn` takes `model="code"` or `model="judge"` and runs the child on that tier's model and thinking level. A tier on the session model, or one whose model has no credentials, runs the child on your model, and the user sees a notice for the second. The prompt lists every pstack role with its tier in the lines that start `pstack roles:`. For a role, pass the `model=` its line gives, and no `model=` for a role on the session model. `model="provider/modelId"` still works when a step needs one model in particular.
 
 | Cursor | Makora |
 | --- | --- |
-| The `pstack-models.mdc` rule, `~/.cursor/rules/pstack-models.mdc` | None. Skip every step that reads or writes it with the line. |
-| `claude-<family>-<version>-<effort>[-fast]`, such as `claude-opus-5-5-xhigh` | The session model. Drop the slug, or pass a Claude model you have as `model=` when the seat must differ from the others. |
-| A `grok-*`, `gpt-*`, or other non-Claude slug | The session model. Drop the slug, or pass a model of that family you have as `model=` when the seat must differ from the others. |
-| `auto` or `inherit-parent` | The session model: omit `model=`. |
-| An effort suffix (`-xhigh`, `-high`) or `-fast` | Drop it. |
-| A two-family panel (arena, architect, interrogate) | One `spawn` per seat, with `model=` set to a second family for half the seats when you have one. Seats on one model are not multi-model evidence, so say so in the reply. |
+| The `pstack-models.mdc` rule, `~/.cursor/rules/pstack-models.mdc` | The `pstack roles:` lines of the prompt, made from the `pstack` block of `~/.makora/settings.json`. Never read or write the `.mdc` file. |
+| `claude-<family>-<version>-<effort>[-fast]`, such as `claude-opus-5-5-xhigh` | The `model=` of the role the step fills, from the `pstack roles:` lines. A judgment, prose, or hardest-task seat that names no role is `model="judge"`. |
+| A `grok-*`, `gpt-*`, or other non-Claude slug | The `model=` of the role the step fills, from the `pstack roles:` lines. A code seat that names no role is `model="code"`. |
+| `auto` or `inherit-parent` | Your model: omit `model=`. |
+| An effort suffix (`-xhigh`, `-high`) or `-fast` | Drop it. The tier's thinking level is the effort, and the `/pstack` budget sets it. |
+| A two-family panel (arena, architect, interrogate) | One `spawn` per seat of the role's panel in the `pstack roles:` lines, each with its seat's `model=` and none for a session seat. The seat count is the panel size. When those lines say code and judge are one model, the seats are not multi-model evidence, so say so in the reply. |
 
-`setup-pstack` configures model roles, which Makora does not have. Answer it with `Skipped in Makora: setup-pstack. Makora has no model roles; every seat runs on the session model unless spawn gets model=.`
+`setup-pstack` is the `/pstack` picker in Makora. Makora opens it when the user types `/pstack` or `/skill:setup-pstack` in the TUI. When you are asked to run setup-pstack, do not follow its steps. Tell the user to type `/pstack`. In print mode no picker can open, so explain the `pstack` block of `~/.makora/settings.json` instead. It holds only what differs from the defaults: `{ "pstack": { "budget": "medium", "models": { "code": { "model": "provider/modelId", "thinking": "high" } }, "roles": { "bug-fix": "judge", "arena runners": ["judge", "code", "code"] } } }`. `budget` is `unlimited`, `large` (the default), `medium`, or `small`. Each tier is `"session"` (the default) or a model with a thinking level. Each role, by its setup-pstack label, is `"code"`, `"judge"`, or `"session"`, and a panel role is a list of them.
 
 ## Paths
 

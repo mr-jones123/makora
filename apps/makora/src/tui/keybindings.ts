@@ -42,6 +42,13 @@ export const MAKORA_KEYBINDINGS = {
 	"app.diff.split": { defaultKeys: "v", description: "side by side" },
 	"app.diff.ask": { defaultKeys: "a", description: "ask" },
 	"app.diff.close": { defaultKeys: "escape", description: "back" },
+	// The /pstack picker's own keys; only the picker reads them. It moves, changes and closes with `tui.select.*`.
+	"app.pstack.budget": { defaultKeys: "b", description: "budget" },
+	"app.pstack.reset": { defaultKeys: "r", description: "reset defaults" },
+	"app.pstack.previousSeat": { defaultKeys: "left", description: "previous seat" },
+	"app.pstack.nextSeat": { defaultKeys: "right", description: "next seat" },
+	"app.pstack.addSeat": { defaultKeys: "a", description: "add seat" },
+	"app.pstack.removeSeat": { defaultKeys: "x", description: "remove seat" },
 } as const satisfies KeybindingDefinitions;
 
 export type MakoraKeybinding = keyof typeof MAKORA_KEYBINDINGS;

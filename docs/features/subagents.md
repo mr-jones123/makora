@@ -22,6 +22,18 @@ await agents.list(); await agents.get(name); await agents.recent(name, limit=6)
 name returns that child instead of starting a second one. A name uses lowercase letters, digits and dashes, and
 `main`, `parent` and `all` are taken.
 
+### Models
+
+| `model=` | The child runs on |
+| --- | --- |
+| omitted | A copy of the parent's model and thinking level |
+| `"code"`, `"judge"` | That pstack tier's model and thinking level from `/pstack`. A tier on the session model is the same as omitting `model=`; a tier whose model has no credentials falls back to it with a notice (`reviewer: the judge tier's model … has no credentials, so it runs on the session model`) |
+| `"provider/modelId"` | That model, with the parent's thinking level; an unknown model is refused |
+
+Any other word is refused (`Unknown model alias …`). The record's `model` is the model the child runs on, so the
+dashboard shows the tier's model. Tiers are read at each spawn, so a change in `/pstack` applies to the next child
+([skills.md](skills.md#pstack-model-roles)).
+
 The model also has a second tool next to `python`: `wait_agents(names, policy="any"|"all")`. It ends the cell and parks
 until one or all of the named children finish, or until a message for the model arrives. A parked wait holds no
 process, so a session can wait for an hour without a running cell.

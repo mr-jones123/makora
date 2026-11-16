@@ -2,7 +2,7 @@
 import type { JsonValue } from "@earendil-works/chord/json";
 import { defineTool, type JsonObject } from "@earendil-works/pi-durable";
 import { compile, obj, opt, str, unknown } from "@earendil-works/pi-schema";
-import { parseModelRef } from "../app.ts";
+import { parseModelRef } from "../models.ts";
 import { messageText } from "../transcript-rows.ts";
 
 const LlmParameters = obj({

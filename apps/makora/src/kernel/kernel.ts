@@ -102,6 +102,9 @@ export class Kernel {
 		child.once("error", (error) => {
 			stderr.text += `${error.message}\n`;
 		});
+		// A kernel that dies before its `exit` event is handled fails the next write with EPIPE. The exit settles every
+		// request with `died`, so the write error says nothing more, and unhandled it would crash makora.
+		child.stdin.on("error", () => {});
 		const exited = exit.promise;
 		const lines = splitLines(child.stdout);
 		const first = await Promise.race([

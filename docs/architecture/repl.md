@@ -285,7 +285,10 @@ The cell that was running when makora died ends as `interrupted`, like any tool 
 stores running details up to 1 s late, so an interrupted cell's summary can lack its cell number.
 
 A kernel that dies during a cell ends it with `kernel died (exit 1) during cell 3`, or `kernel died (SIGKILL, exit
-137) during cell 3` for a signal, followed by the last 2,000 characters of the kernel's own stderr.
+137) during cell 3` for a signal, followed by the last 2,000 characters of the kernel's own stderr. A request sent
+after the kernel died but before makora handled its exit (a snapshot right after a stop, for example) fails its write
+with EPIPE; that error is ignored and the exit answers the request with `died`. Unhandled, it crashed makora's
+process: one run of `test/agents.test.ts` failed that way.
 
 ## Durability is optional
 
