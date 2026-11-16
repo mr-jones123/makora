@@ -1,15 +1,21 @@
-"""The functions a cell calls into makora: Durable's coding tools, one model call, and the conversation's context."""
+"""The functions a cell calls into makora: Durable's coding tools, one model call, the conversation's context, and its
+subagents."""
+
+# `Agents.list` shadows the builtin inside its class body; postponed annotations keep `list[...]` meaning the builtin.
+from __future__ import annotations
 
 import asyncio
 from typing import Any, Protocol
+
+from makora_rlm.protocol import HostMethod
 
 
 class Host(Protocol):
     """Sends one `host_request` and returns the `host_reply` value; raises `HostError` for an error reply."""
 
-    async def call(self, method: str, params: dict[str, Any]) -> Any: ...
+    async def call(self, method: HostMethod, params: dict[str, Any]) -> Any: ...
 
-    def call_sync(self, method: str, params: dict[str, Any]) -> Any: ...
+    def call_sync(self, method: HostMethod, params: dict[str, Any]) -> Any: ...
 
 
 class HostError(Exception):
@@ -49,6 +55,39 @@ class Context:
 
     def __repr__(self) -> str:
         return "<makora ctx: ctx.input(), await ctx.transcript(limit=20)>"
+
+
+class Agents:
+    """`agents` in a cell: this conversation's subagents."""
+
+    def __init__(self, host: Host):
+        self._host = host
+
+    async def list(self) -> list[dict[str, Any]]:
+        """Every child of this conversation, as records."""
+        return await _agents(self._host, "list", {})
+
+    async def get(self, name: str) -> dict[str, Any]:
+        """The child `name`'s record: mode, worktree, budget, state and result."""
+        return await _agents(self._host, "get", {"name": name})
+
+    async def recent(self, name: str, limit: int = 6) -> list[dict[str, Any]]:
+        """The newest `limit` messages of the child `name`'s transcript, oldest first, each cut to 800 characters."""
+        return await _agents(self._host, "recent", {"name": name, "limit": limit})
+
+    def __repr__(self) -> str:
+        return "<makora agents: await agents.list(), agents.get(name), agents.recent(name, limit=6)>"
+
+
+async def _agents(host: Host, action: str, args: dict[str, Any]) -> Any:
+    return await host.call("agents", {"action": action, "args": _defined(args)})
+
+
+def _defined(value: Any) -> Any:
+    """`value` without the `None` entries of its dicts, at any depth: an omitted argument takes its default."""
+    if isinstance(value, dict):
+        return {key: _defined(item) for key, item in value.items() if item is not None}
+    return value
 
 
 def build(host: Host) -> dict[str, Any]:
@@ -96,7 +135,50 @@ def build(host: Host) -> dict[str, Any]:
         result = await asyncio.wait_for(host.call("llm", params), timeout)
         return result["json"] if schema is not None else result["text"]
 
+    async def spawn(
+        name: str,
+        task: str,
+        mode: str = "write",
+        ref: str | None = None,
+        base: str | None = None,
+        model: str | None = None,
+        budget: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Start a subagent in its own worktree and REPL and return its record at once; an existing name returns that
+        child. `mode="review"` checks out `ref` detached; `mode="write"` works on a new branch from `base`. `budget`
+        takes `usd`, `minutes` and `turns`."""
+        args = {"name": name, "task": task, "mode": mode, "ref": ref, "base": base, "model": model, "budget": budget}
+        return await _agents(host, "spawn", args)
+
+    async def collect(names: list[str] | str, timeout: float | None = None) -> dict[str, dict[str, Any]]:
+        """Wait inside the cell until every named child finished (or `timeout` seconds passed); their records by name."""
+        return await _agents(host, "collect", {"names": [names] if isinstance(names, str) else names, "timeout": timeout})
+
+    async def send(to: str, message: str) -> Any:
+        """Message a child, a sibling, `"parent"`, or `"all"` of them; a receipt, or one per member for `"all"`."""
+        return await _agents(host, "send", {"to": to, "message": message})
+
+    async def merge(name: str) -> dict[str, Any]:
+        """Merge a finished write child's branch into this conversation's tree: `{merged, commit}`, or `{conflicts}`
+        with the tree left clean."""
+        return await _agents(host, "merge", {"name": name})
+
+    async def stop(name: str) -> dict[str, Any]:
+        """Stop the child's work; it keeps its transcript and worktree until removed."""
+        return await _agents(host, "stop", {"name": name})
+
+    async def remove(name: str) -> dict[str, Any]:
+        """Stop the child and its children, and delete their worktrees (an unmerged write branch is kept)."""
+        return await _agents(host, "remove", {"name": name})
+
     return {
+        "spawn": spawn,
+        "collect": collect,
+        "send": send,
+        "merge": merge,
+        "stop": stop,
+        "remove": remove,
+        "agents": Agents(host),
         "read": read,
         "write": write,
         "edit": edit,

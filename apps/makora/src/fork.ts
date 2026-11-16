@@ -1,9 +1,8 @@
 // Forks: a Durable fork of a conversation at an earlier entry that keeps the Python variables and the files as they were
 // there. Inside a git repository the fork's files are a git worktree of its own, at a commit of the fork point's file
 // snapshot; the record of each fork is a `makora.fork` document on the fork.
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import {
 	type Conversation,
@@ -19,6 +18,7 @@ import { pythonDetails } from "./repl/details.ts";
 import { commitTree, git } from "./repl/git-tree.ts";
 import type { MakoraSession } from "./session.ts";
 import { messageText } from "./transcript-rows.ts";
+import { addWorktree, findRepo, type RepoPlace, removeWorktree, worktreePath } from "./worktrees.ts";
 
 /** Where a fork's files live. */
 export type ForkFiles =
@@ -153,11 +153,8 @@ export async function ensureForkFiles(session: MakoraSession, fork: Fork): Promi
 	const { files } = fork.record;
 	if (files.kind === "shared" || existsSync(files.path)) return;
 	const repo = session.meta.cwd;
-	// A worktree whose folder was deleted is still registered, and blocks `worktree add` at its path.
-	await git(repo, ["worktree", "prune"]);
 	if (files.kind === "snapshot") await git(repo, ["update-ref", forkRef(session, fork.conversationId), files.commit]);
-	mkdirSync(dirname(files.path), { recursive: true });
-	await git(repo, ["worktree", "add", "--detach", files.path, files.commit]);
+	await addWorktree(repo, files.path, { kind: "detached", commit: files.commit });
 }
 
 /** Whether the fork's worktree has changes against the commit it started at, untracked files included. */
@@ -177,10 +174,7 @@ export async function removeFork(session: MakoraSession, fork: Fork, context: Co
 	await session.kernels.stop(id);
 	const { files } = fork.record;
 	const repo = session.meta.cwd;
-	if (files.kind !== "shared") {
-		if (existsSync(files.path)) await git(repo, ["worktree", "remove", "--force", files.path]);
-		else await git(repo, ["worktree", "prune"]);
-	}
+	if (files.kind !== "shared") await removeWorktree(repo, files.path);
 	if (files.kind === "snapshot") await git(repo, ["update-ref", "-d", forkRef(session, id)]);
 	await markRemoved(session.harness, fork, context);
 }
@@ -189,16 +183,6 @@ export async function removeFork(session: MakoraSession, fork: Fork, context: Co
 export function forkRef(session: MakoraSession, id: ConversationId): string {
 	return `refs/makora/${session.meta.id}/forks/${id}`;
 }
-
-/** The repository a fork's worktree comes from, as seen from the parent's folder. */
-type RepoPlace = {
-	/** Top level of the parent's worktree. */
-	readonly top: string;
-	/** `<repo dir name>-<short hash of its path>`: the directory of the repository's forks under `worktrees`. */
-	readonly dir: string;
-	/** The parent's folder relative to `top`. */
-	readonly relative: string;
-};
 
 /** Where a new fork's files come from, before the fork's worktree path is known. */
 type Placement =
@@ -214,18 +198,13 @@ const NOTICES: Readonly<Record<"snapshot" | "head" | "not_git" | "no_commits", s
 };
 
 async function placeFiles(cwd: string, parent: Conversation, at: EntryId, context: Context): Promise<Placement> {
-	const top = await git(cwd, ["rev-parse", "--show-toplevel"]).catch(() => undefined);
-	if (top === undefined) return { kind: "shared", reason: "not_git" };
-	// A fork of a fork runs in a linked worktree; its forks still belong under the main repository's directory.
-	const common = resolve(top, await git(top, ["rev-parse", "--git-common-dir"]));
-	const main = basename(common) === ".git" ? dirname(common) : common;
-	const hash = createHash("sha256").update(main).digest("hex").slice(0, 8);
-	const repo = { top, dir: `${basename(main)}-${hash}`, relative: relative(top, realpathSync(cwd)) };
-	const head = await git(top, ["rev-parse", "--verify", "--quiet", "HEAD"]).catch(() => undefined);
+	const repo = await findRepo(cwd);
+	if (repo === undefined) return { kind: "shared", reason: "not_git" };
+	const head = await git(repo.top, ["rev-parse", "--verify", "--quiet", "HEAD"]).catch(() => undefined);
 	const tree = await snapshotTree(parent, at, context);
 	// HEAD as the parent makes `git diff HEAD` in the fork show what the fork point had on top of the branch.
 	if (tree !== undefined)
-		return { kind: "snapshot", repo, tree, commit: await commitTree(top, tree, head, "makora fork") };
+		return { kind: "snapshot", repo, tree, commit: await commitTree(repo.top, tree, head, "makora fork") };
 	return head === undefined ? { kind: "shared", reason: "no_commits" } : { kind: "head", repo, commit: head };
 }
 
@@ -249,7 +228,7 @@ function locate(
 	id: ConversationId,
 ): { readonly files: ForkFiles; readonly cwd: string } {
 	if (placement.kind === "shared") return { files: { kind: "shared" }, cwd: parentCwd };
-	const path = join(worktrees, placement.repo.dir, sessionId, String(id));
+	const path = worktreePath(worktrees, placement.repo, sessionId, id);
 	const files: ForkFiles =
 		placement.kind === "snapshot"
 			? { kind: "snapshot", path, commit: placement.commit, tree: placement.tree }

@@ -168,7 +168,7 @@ async function answerPrompt(host: CommandHost, prompt: AuthPrompt, cancel: Abort
 							label: option.label,
 							...(option.description === undefined ? {} : { description: option.description }),
 						})),
-						signal,
+						{ signal },
 					)
 				)?.value
 			: await host.dialogs.input("Log in", {

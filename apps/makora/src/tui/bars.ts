@@ -37,19 +37,19 @@ export function spread(left: string, right: string, width: number): string {
 
 /** The top bar's data. */
 export interface TopBar {
-	/** The active conversation's fork label; undefined for the root. */
-	readonly fork: string | undefined;
+	/** On a conversation other than the main one: `viewing <name> · <mode> · <branch> · esc back to main`. */
+	readonly viewing: string | undefined;
 	readonly title: string | undefined;
 	readonly cwd: string;
 	readonly costUsd: number;
 	readonly elapsedMs: number;
 }
 
-/** `makora · [<fork> · ]<title> · <cwd>` with `$<cost> · <elapsed>` on the right. */
+/** `makora · [viewing … · ]<title> · <cwd>` with `$<cost> · <elapsed>` on the right. */
 export function topBar(bar: TopBar, width: number): string {
-	const fork = bar.fork === undefined ? "" : theme.dim(" · ") + theme.bold(theme.warning(bar.fork));
+	const viewing = bar.viewing === undefined ? "" : theme.dim(" · ") + theme.bold(theme.warning(bar.viewing));
 	const title = bar.title ? ` · ${bar.title}` : "";
-	const left = `${theme.bold(theme.accent("makora"))}${fork}${theme.muted(`${title} · ${bar.cwd}`)}`;
+	const left = `${theme.bold(theme.accent("makora"))}${viewing}${theme.muted(`${title} · ${bar.cwd}`)}`;
 	return spread(left, theme.muted(`${formatCost(bar.costUsd)} · ${formatElapsed(bar.elapsedMs)}`), width);
 }
 
@@ -154,4 +154,12 @@ export function formatElapsed(ms: number): string {
 	if (seconds < 60) return `${seconds}s`;
 	if (seconds < 3600) return `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
 	return `${Math.floor(seconds / 3600)}h${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}m`;
+}
+
+/** `text` cut from the start to `width` columns, so a path keeps its file name. */
+export function fitStart(text: string, width: number): string {
+	if (visibleWidth(text) <= width) return text;
+	const chars = [...text];
+	while (chars.length > 0 && visibleWidth(chars.join("")) > width - 1) chars.shift();
+	return `…${chars.join("")}`;
 }

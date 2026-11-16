@@ -54,8 +54,8 @@ export function commitTree(top: string, tree: string, parent: string | undefined
 	return git(top, ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message], env);
 }
 
-// commit-tree needs an identity; the user's may be unset, and these commits are makora's own.
-const MAKORA_AUTHOR = {
+// Makora's own commits (cell trees, forks, a child's work, merges) need an identity; the user's may be unset.
+export const MAKORA_AUTHOR = {
 	GIT_AUTHOR_NAME: "makora",
 	GIT_AUTHOR_EMAIL: "makora@localhost",
 	GIT_COMMITTER_NAME: "makora",

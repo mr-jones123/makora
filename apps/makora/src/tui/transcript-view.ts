@@ -74,6 +74,14 @@ export class TranscriptView implements Component {
 					if (expanded) lines.push(...expandedCell(row.cell, width, now, frame));
 					break;
 				}
+				case "agent": {
+					lines.push(truncateToWidth(`${theme.accent("↩ ")}${theme.bold(theme.text(row.title))}`, width, "…"));
+					const text = row.text.split("\n");
+					const shown = expanded ? text : text.slice(0, AGENT_LINES);
+					lines.push(...prefixed("  ", "  ", shown.join("\n"), width, theme.muted));
+					if (shown.length < text.length) lines.push(theme.dim(`  … ${text.length - shown.length} more lines`));
+					break;
+				}
 				case "notice":
 					lines.push(...warningBox(row.message, width));
 					break;
@@ -87,6 +95,9 @@ export class TranscriptView implements Component {
 		return lines;
 	}
 }
+
+/** Lines of an agent's result or message shown before the transcript is expanded. */
+const AGENT_LINES = 6;
 
 function prefixed(first: string, rest: string, text: string, width: number, paint: Paint): string[] {
 	const inner = Math.max(1, width - visibleWidth(first));

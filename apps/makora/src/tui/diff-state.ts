@@ -7,7 +7,12 @@ export type DiffTab =
 	| { readonly kind: "working" }
 	| { readonly kind: "staged" }
 	| { readonly kind: "base"; readonly base: string }
+	/** The working tree against a commit, such as a subagent's worktree against the commit it started at. */
+	| { readonly kind: "since"; readonly commit: string; readonly label: string }
 	| { readonly kind: "history" };
+
+/** The tab of the working tree against a commit. */
+export type SinceTab = Extract<DiffTab, { readonly kind: "since" }>;
 
 /** Where a listed file's change lives, which decides whether stage, unstage and revert apply to it. */
 export type FileArea = "unstaged" | "staged" | "readonly";
@@ -71,7 +76,8 @@ export type DiffState = { readonly kind: "opening" } | { readonly kind: "notRepo
 
 /** A change to the diff view's state. Moves carry the pane geometry the view measured. */
 export type DiffAction =
-	| { readonly type: "opened"; readonly repo: string; readonly tabs: readonly DiffTab[] }
+	/** `start`: the tab to show, unless the same tabs were open, which keeps the one the user was on. */
+	| { readonly type: "opened"; readonly repo: string; readonly tabs: readonly DiffTab[]; readonly start: number }
 	| { readonly type: "notRepo" }
 	| { readonly type: "loaded"; readonly tab: number; readonly content: TabContent }
 	| { readonly type: "commitLoading"; readonly sha: string }
@@ -119,7 +125,7 @@ export function reduceDiff(state: DiffState, action: DiffAction): DiffState {
 			kind: "ready",
 			repo: action.repo,
 			tabs: action.tabs,
-			tab: sameTabs ? previous.tab : 0,
+			tab: sameTabs ? previous.tab : action.start,
 			content: { kind: "loading" },
 			focus: previous?.focus ?? "list",
 			selected: sameTabs ? previous.selected : 0,

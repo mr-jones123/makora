@@ -71,7 +71,8 @@ export interface ReadyMessage {
 
 /**
  * A call from Python into makora while cell `cellId` runs: `tool` runs a Durable tool (`read`, `write`, `edit`,
- * `bash`) as a nested call; `llm` runs one model call; `ctx` reads conversation context.
+ * `bash`) as a nested call; `llm` runs one model call; `ctx` reads conversation context; `agents` runs one of the
+ * subagent tools as a nested call.
  */
 export type HostRequest = {
 	readonly type: "host_request";
@@ -90,7 +91,14 @@ export type HostRequest = {
 			readonly method: "ctx";
 			readonly params: { readonly what: "input" } | { readonly what: "transcript"; readonly limit: number };
 	  }
+	| {
+			readonly method: "agents";
+			readonly params: { readonly action: AgentAction; readonly args: Readonly<Record<string, unknown>> };
+	  }
 );
+
+/** What a cell asks of its subagents through the `agents` host method. */
+export type AgentAction = "spawn" | "collect" | "send" | "merge" | "stop" | "remove" | "list" | "get" | "recent";
 
 /** How a cell ended. */
 export interface ExecuteResult {

@@ -12,14 +12,19 @@ import {
 /** Makora's app actions; each description is the label the hint rows show. */
 export const MAKORA_KEYBINDINGS = {
 	"app.interrupt": { defaultKeys: "escape", description: "interrupt" },
+	// Checked before `app.interrupt`: on another agent's conversation, the key goes back to the main one.
+	"app.back": { defaultKeys: "escape", description: "back to main" },
 	"app.exit": { defaultKeys: "ctrl+d", description: "exit" },
 	"app.cancel": { defaultKeys: "ctrl+c", description: "cancel" },
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "expand cells" },
 	"app.agents": { defaultKeys: "ctrl+a", description: "agents" },
 	"app.model.select": { defaultKeys: "ctrl+l", description: "model" },
 	"app.diff": { defaultKeys: "ctrl+g", description: "diff" },
-	// The agents view's own key; only that view reads it.
-	"app.agents.remove": { defaultKeys: "x", description: "remove fork" },
+	// The agents dashboard's own keys; only that view reads them.
+	"app.agents.diff": { defaultKeys: "d", description: "diff" },
+	"app.agents.merge": { defaultKeys: "m", description: "merge" },
+	"app.agents.stop": { defaultKeys: "s", description: "stop" },
+	"app.agents.remove": { defaultKeys: "x", description: "remove" },
 	// The diff view's own keys; only that view reads them, so they may share keys with the editor's.
 	"app.diff.up": { defaultKeys: ["up", "k"], description: "up" },
 	"app.diff.down": { defaultKeys: ["down", "j"], description: "down" },

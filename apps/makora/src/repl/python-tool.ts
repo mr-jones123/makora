@@ -18,7 +18,7 @@ import type { ReadToolDetails } from "@earendil-works/pi-durable/tools";
 import { num, obj, opt, str } from "@earendil-works/pi-schema";
 import { describeExit, type Kernel } from "../kernel/kernel.ts";
 import type { KernelManager } from "../kernel/manager.ts";
-import type { ExecuteResult, HostRequest, SnapshotManifest } from "../kernel/protocol.ts";
+import type { AgentAction, ExecuteResult, HostRequest, SnapshotManifest } from "../kernel/protocol.ts";
 import {
 	type CellKernel,
 	type CellSnapshot,
@@ -288,8 +288,27 @@ async function answerHost(
 			return request.params.what === "input"
 				? latestInput(api, context)
 				: recentEntries(api, request.params.limit, context);
+		case "agents": {
+			const { action } = request.params;
+			const args = request.params.args as JsonObject;
+			const [name, params] = AGENT_TOOLS[action](args);
+			return (await nestedTool(name, params, request.requestId, calls, api, context)).structuredOutput ?? "";
+		}
 	}
 }
+
+// Each subagent action is one nested call of an agents tool; reads share the `agents` tool.
+const AGENT_TOOLS: Readonly<Record<AgentAction, (args: JsonObject) => readonly [string, JsonObject]>> = {
+	spawn: (args) => ["spawn", args],
+	collect: (args) => ["collect", args],
+	send: (args) => ["send", args],
+	merge: (args) => ["merge", args],
+	stop: (args) => ["stop", args],
+	remove: (args) => ["remove", args],
+	list: (args) => ["agents", { ...args, action: "list" }],
+	get: (args) => ["agents", { ...args, action: "get" }],
+	recent: (args) => ["agents", { ...args, action: "recent" }],
+};
 
 // Durable's read stops at its line and byte limits and says so only in a diagnostic, which a program never sees, so
 // `await read(path)` follows the continuation offsets to the end of the file. A line over the byte limit cannot be

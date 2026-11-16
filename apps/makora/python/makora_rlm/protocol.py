@@ -1,6 +1,6 @@
 """The wire protocol between makora and a kernel; mirrors apps/makora/src/kernel/protocol.ts, change both together."""
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 PROTOCOL_VERSION = 1
 
@@ -68,3 +68,18 @@ class ExecuteResult(TypedDict):
 class RestoreFailure(TypedDict):
     name: str
     reason: str
+
+
+AgentAction = Literal["spawn", "collect", "send", "merge", "stop", "remove", "list", "get", "recent"]
+
+HostMethod = Literal["tool", "llm", "ctx", "agents"]
+
+
+class HostRequest(TypedDict):
+    """A helper's call into makora: `tool`, `llm`, `ctx`, or `agents` with `{"action": AgentAction, "args": ...}`."""
+
+    type: Literal["host_request"]
+    requestId: str
+    cellId: str
+    method: HostMethod
+    params: dict[str, Any]

@@ -2,9 +2,10 @@
 import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import { type Cursor, type EntryId, type EntryRecord, LiveDoc, type LiveState } from "@earendil-works/pi-durable";
+import { AGENT_MESSAGE_ENTRY, AGENT_RESULT_ENTRY } from "./agents/prompts.ts";
 import type { MakoraSession } from "./session.ts";
 import { toolSummary } from "./tool-cell.ts";
-import { describeRunFailure, messageText, responseEnd, toolCellOf } from "./transcript-rows.ts";
+import { describeRunFailure, messageText, responseEnd, toolCellOf, transcriptRows } from "./transcript-rows.ts";
 
 /** Where print mode writes. */
 export interface PrintOutput {
@@ -79,6 +80,13 @@ class TranscriptPrinter {
 	entry(entry: EntryRecord, show: boolean): void {
 		if (this.#newest !== undefined && entry.id <= this.#newest) return;
 		this.#newest = entry.id;
+		if (show && entry.kind === "makora.notice") {
+			// A child's setup command that was skipped: the notice says how to approve it.
+			for (const row of transcriptRows([entry], undefined)) {
+				if (row.kind === "notice") this.#output.stderr(`⚠ ${row.message}\n`);
+			}
+			return;
+		}
 		const message = entry.model?.[0];
 		if (message === undefined) return;
 		if (message.role === "assistant") {
@@ -101,6 +109,10 @@ class TranscriptPrinter {
 				Date.now(),
 			);
 			this.#output.stderr(`${summary.marker} ${summary.text}\n`);
+		} else if (show && (entry.kind === AGENT_RESULT_ENTRY || entry.kind === AGENT_MESSAGE_ENTRY)) {
+			for (const row of transcriptRows([entry], undefined)) {
+				if (row.kind === "agent") this.#output.stderr(`↩ ${row.title}\n`);
+			}
 		} else if (message.role === "user" && show && this.#echoUsers && entry.kind === "pi.user") {
 			this.#closeLine();
 			this.#output.stdout(`› ${messageText(message)}\n\n`);

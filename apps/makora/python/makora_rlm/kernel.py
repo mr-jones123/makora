@@ -31,7 +31,16 @@ from typing import Any, BinaryIO
 import dill
 
 from makora_rlm import helpers, snapshot
-from makora_rlm.protocol import CellError, ExecuteRequest, ExecuteResult, RestoreRequest, SnapshotRequest, PROTOCOL_VERSION
+from makora_rlm.protocol import (
+    CellError,
+    ExecuteRequest,
+    ExecuteResult,
+    HostMethod,
+    HostRequest,
+    RestoreRequest,
+    SnapshotRequest,
+    PROTOCOL_VERSION,
+)
 
 # Top-level `await` in a cell.
 COMPILE_FLAGS = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT
@@ -245,23 +254,28 @@ class Kernel:
             raise KeyboardInterrupt
         self.loop.call_soon_threadsafe(cell.task.cancel)
 
-    async def call(self, method: str, params: dict[str, Any]) -> Any:
+    async def call(self, method: HostMethod, params: dict[str, Any]) -> Any:
         """Send a host request and await its reply (the helpers' `Host`)."""
         return await asyncio.wrap_future(self._request(method, params))
 
-    def call_sync(self, method: str, params: dict[str, Any]) -> Any:
+    def call_sync(self, method: HostMethod, params: dict[str, Any]) -> Any:
         """Send a host request and block until its reply."""
         return self._request(method, params).result()
 
-    def _request(self, method: str, params: dict[str, Any]) -> "concurrent.futures.Future[Any]":
+    def _request(self, method: HostMethod, params: dict[str, Any]) -> "concurrent.futures.Future[Any]":
         request_id = f"h{next(self.request_ids)}"
         future: concurrent.futures.Future[Any] = concurrent.futures.Future()
         self.pending[request_id] = future
         self.output.flush()
         cell_id = self.cell.id if self.cell is not None else ""
-        self.wire.send(
-            {"type": "host_request", "requestId": request_id, "cellId": cell_id, "method": method, "params": params}
-        )
+        request: HostRequest = {
+            "type": "host_request",
+            "requestId": request_id,
+            "cellId": cell_id,
+            "method": method,
+            "params": params,
+        }
+        self.wire.send(dict(request))
         return future
 
     def _reply(self, message: dict[str, Any]) -> None:

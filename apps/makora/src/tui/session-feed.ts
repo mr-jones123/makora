@@ -15,10 +15,14 @@ import {
 	type TranscriptItem,
 	type UsageState,
 } from "@earendil-works/pi-durable";
+import { AgentsDoc } from "../agents/docs.ts";
+import { identityOf } from "../agents/family.ts";
+import type { AgentRecord } from "../agents/types.ts";
 import { type ForkRecord, readFork } from "../fork.ts";
 import type { KernelStatus } from "../kernel/manager.ts";
 import type { MakoraSession } from "../session.ts";
 import { type TranscriptRow, transcriptRows } from "../transcript-rows.ts";
+import { totalCost } from "../usage.ts";
 
 /** A message the TUI itself adds to the transcript: command output, login steps, errors. */
 export interface LocalRow {
@@ -76,6 +80,7 @@ export class SessionFeed {
 	#localCounter = 0;
 	#state: FeedState | undefined;
 	#fork: ForkRecord | undefined;
+	#record: AgentRecord | undefined;
 	readonly #unsubscribeKernels: () => void;
 
 	constructor(session: MakoraSession, conversation: Conversation) {
@@ -92,10 +97,24 @@ export class SessionFeed {
 		return this.#fork;
 	}
 
+	/**
+	 * The conversation's subagent record, read at `start()`; undefined for a conversation no parent spawned. Its name,
+	 * mode and worktree never change; its state is as of the read.
+	 */
+	get agent(): AgentRecord | undefined {
+		return this.#record;
+	}
+
 	/** Start watching; resolves once the first values are in. */
 	async start(): Promise<void> {
 		const context = BACKGROUND_CONTEXT;
-		this.#fork = await readFork(this.session.harness, this.conversation.id, context);
+		const { harness } = this.session;
+		this.#fork = await readFork(harness, this.conversation.id, context);
+		const self = await identityOf(harness, this.conversation.id, context);
+		this.#record =
+			self === undefined
+				? undefined
+				: (await harness.snapshot(AgentsDoc, self.parentConversationId, context))?.agents[self.name];
 		this.#watch = await this.conversation.watch(context);
 		this.#merge(this.#watch.value);
 		this.#watch.start(async (call) => {
@@ -245,13 +264,4 @@ export class SessionFeed {
 		}
 		return undefined;
 	}
-}
-
-/** Every model and tool cost of `usage`, in USD. */
-export function totalCost(usage: UsageState | undefined): number {
-	if (usage === undefined) return 0;
-	let total = 0;
-	for (const bucket of [usage.models, usage.tools])
-		for (const entry of Object.values(bucket)) total += entry.cost.total;
-	return total;
 }

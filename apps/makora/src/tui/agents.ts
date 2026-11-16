@@ -1,60 +1,80 @@
-// The agents view: every conversation of the session as a row (the root, its forks, and the subagents tasks own), and
-// the selected agent's details. Generic over the task graph, so subagents appear without changes here.
+// The agents dashboard (layout A): reads every agent of the session from Durable (the main conversation, its forks,
+// and the subagents with their children) and draws the list and the selected agent's inspector. What each row and
+// inspector line says is decided in `dashboard.ts`.
 import type { Context } from "@earendil-works/chord/context";
 import {
 	type ConversationId,
 	type ConversationRecord,
 	type Cursor,
 	type Harness,
-	type TaskGraph,
+	LiveDoc,
 	UsageDoc,
 } from "@earendil-works/pi-durable";
 import { type Component, getKeybindings, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { type ForkFiles, type ForkRecord, readFork } from "../fork.ts";
-import { SPINNER, type ToolCell, toolSummary } from "../tool-cell.ts";
-import { responseEnd, transcriptRows } from "../transcript-rows.ts";
+import { AgentsDoc, MessageLogDoc } from "../agents/docs.ts";
+import { identityOf, ROOT_NAME } from "../agents/family.ts";
+import type { AgentMessage } from "../agents/types.ts";
+import { readFork } from "../fork.ts";
+import { gitBranch } from "../project.ts";
+import { transcriptRows } from "../transcript-rows.ts";
+import { totalCost } from "../usage.ts";
 import { formatCost, formatElapsed, hintLine, spread } from "./bars.ts";
-import { totalCost } from "./session-feed.ts";
+import {
+	type AgentFacts,
+	type AgentKind,
+	budgetBar,
+	type DashboardRow,
+	glyph,
+	type InspectorExtras,
+	inspectorLines,
+	SECTIONS,
+	type Section,
+} from "./dashboard.ts";
+import { MAKORA_KEYBINDINGS, type MakoraKeybinding } from "./keybindings.ts";
 import { theme } from "./theme.ts";
 
-/** Which list section a row is in. */
-export type AgentSection = "running" | "idle" | "done";
+/** What the dashboard reads from Durable at each poll. */
+export type AgentsSnapshot = {
+	readonly facts: readonly AgentFacts[];
+	/** The session's message log, oldest first. */
+	readonly messages: readonly AgentMessage[];
+};
 
-/** One agent: a conversation, its place in the ownership tree, and what the list and detail show of it. */
-export interface AgentRow {
-	readonly conversationId: ConversationId;
-	readonly name: string;
-	readonly section: AgentSection;
-	/** Own status, which can differ from the section of the tree it is nested in. */
-	readonly status: AgentSection;
-	/** Nesting under its owner; 0 for a top-level agent. */
-	readonly depth: number;
-	readonly model: string | undefined;
-	readonly cwd: string | undefined;
-	readonly costUsd: number;
-	readonly turns: number;
-	readonly startedAt: number | undefined;
-	readonly lastAt: number | undefined;
-	/** Newest tool calls, oldest first, with when each started. */
-	readonly recent: readonly { readonly at: number; readonly cell: ToolCell }[];
-	/** The fork record, when the conversation is a fork. */
-	readonly fork: ForkRecord | undefined;
-}
-
-const SECTIONS: readonly AgentSection[] = ["running", "idle", "done"];
-const RECENT_CALLS = 8;
 const ENTRY_PAGE = 200;
 
 /**
- * The agent rows of the session behind `harness`, in display order: by section, each tree depth first. Forks nest under
- * the conversation they came from; removed forks are left out.
+ * The session's agents (the root, every fork, and every subagent) in conversation order, with the message log.
  */
-export async function loadAgentRows(
-	harness: Harness,
-	rootId: ConversationId,
-	graph: TaskGraph,
-	context: Context,
-): Promise<AgentRow[]> {
+export async function loadAgents(harness: Harness, rootId: ConversationId, context: Context): Promise<AgentsSnapshot> {
+	const conversations = await scanConversations(harness, context);
+	const [facts, log] = await Promise.all([
+		Promise.all(conversations.map((record) => agentFacts(harness, record.id, rootId, context))),
+		harness.snapshot(MessageLogDoc, context),
+	]);
+	return {
+		facts: facts.filter((each): each is AgentFacts => each !== undefined),
+		messages: log?.messages ?? [],
+	};
+}
+
+/** The worktrees the session keeps: forks' and subagents' that are not removed (a queued subagent has none yet). */
+export async function countWorktrees(harness: Harness, context: Context): Promise<number> {
+	let count = 0;
+	for (const conversation of await scanConversations(harness, context)) {
+		const [fork, children] = await Promise.all([
+			readFork(harness, conversation.id, context),
+			harness.snapshot(AgentsDoc, conversation.id, context),
+		]);
+		if (fork !== undefined && fork.removed !== true && fork.files.kind !== "shared") count++;
+		for (const record of Object.values(children?.agents ?? {})) {
+			const live = record.state.kind !== "removed" && record.state.kind !== "queued";
+			if (live && record.worktree.kind === "worktree") count++;
+		}
+	}
+	return count;
+}
+
+async function scanConversations(harness: Harness, context: Context): Promise<ConversationRecord[]> {
 	const conversations: ConversationRecord[] = [];
 	let cursor: Cursor | undefined;
 	do {
@@ -62,117 +82,108 @@ export async function loadAgentRows(
 		conversations.push(...page.items);
 		cursor = page.next;
 	} while (cursor !== undefined);
-	const tasks = Object.values(graph.tasks);
-	const liveTasks = new Set(tasks.map((task) => String(task.id)));
-	const details = await Promise.all(
-		conversations.map(async (record) => {
-			const status: AgentSection = tasks.some(
-				(task) => task.conversationId === record.id && task.state.status !== "sleeping",
-			)
-				? "running"
-				: record.owner !== undefined && !liveTasks.has(String(record.owner.taskId))
-					? "done"
-					: "idle";
-			return { record, status, ...(await conversationDetail(harness, record.id, context)) };
-		}),
-	);
-	const children = new Map<ConversationId | undefined, typeof details>();
-	const shown = details.filter((detail) => detail.fork?.removed !== true);
-	const known = new Set(shown.map((detail) => detail.record.id));
-	for (const detail of shown) {
-		const owner = detail.record.owner?.conversationId ?? detail.fork?.parentConversationId;
-		const parent = owner !== undefined && known.has(owner) ? owner : undefined;
-		children.set(parent, [...(children.get(parent) ?? []), detail]);
-	}
-	const rows: AgentRow[] = [];
-	const visit = (detail: (typeof details)[number], depth: number, section: AgentSection): void => {
-		rows.push({
-			conversationId: detail.record.id,
-			name: detail.record.id === rootId ? "main" : (detail.fork?.label ?? `agent ${detail.record.id}`),
-			section,
-			status: detail.status,
-			depth,
-			model: detail.model,
-			cwd: detail.cwd,
-			costUsd: detail.costUsd,
-			turns: detail.turns,
-			startedAt: detail.startedAt,
-			lastAt: detail.lastAt,
-			recent: detail.recent,
-			fork: detail.fork,
-		});
-		for (const child of children.get(detail.record.id) ?? []) visit(child, depth + 1, section);
-	};
-	const tops = children.get(undefined) ?? [];
-	for (const section of SECTIONS) for (const top of tops) if (top.status === section) visit(top, 0, section);
-	return rows;
+	return conversations;
 }
 
-async function conversationDetail(harness: Harness, id: ConversationId, context: Context) {
-	const conversation = await harness.conversation(id, context);
-	const [agent, usage, newest, oldest, fork] = await Promise.all([
-		conversation?.agent(context),
-		harness.snapshot(UsageDoc, id, context),
-		conversation?.entries({}, ENTRY_PAGE, undefined, context),
-		conversation?.entries({ order: "ascending" }, 1, undefined, context),
-		readFork(harness, id, context),
+async function agentFacts(
+	harness: Harness,
+	id: ConversationId,
+	rootId: ConversationId,
+	context: Context,
+): Promise<AgentFacts | undefined> {
+	const [who, conversation] = await Promise.all([
+		kindOf(harness, id, rootId, context),
+		harness.conversation(id, context),
 	]);
-	const entries = [...(newest?.items ?? [])].reverse();
-	const times = new Map<string, number>();
-	let turns = 0;
-	for (const entry of entries) {
-		const message = entry.model?.[0];
-		if (message?.role !== "assistant") continue;
-		turns++;
-		for (const block of message.content) if (block.type === "toolCall") times.set(block.id, responseEnd(message));
-	}
-	const recent = transcriptRows(entries, undefined)
-		.flatMap((row) => (row.kind === "tool" ? [{ at: times.get(row.cell.callId) ?? 0, cell: row.cell }] : []))
-		.slice(-RECENT_CALLS);
-	const first = oldest?.items[0]?.model?.[0];
+	if (who === undefined || conversation === undefined) return undefined;
+	const [agent, usage, live, newest, oldest] = await Promise.all([
+		conversation.agent(context),
+		harness.snapshot(UsageDoc, id, context),
+		harness.snapshot(LiveDoc, id, context),
+		conversation.entries({}, ENTRY_PAGE, undefined, context),
+		conversation.entries({ order: "ascending" }, 1, undefined, context),
+	]);
+	const entries = [...newest.items].reverse();
+	const turns = entries.filter((entry) => entry.model?.[0]?.role === "assistant").length;
+	const cells = transcriptRows(entries, live).flatMap((row) =>
+		row.kind === "tool" && row.cell.name === "python" ? [row.cell] : [],
+	);
+	const first = oldest.items[0]?.model?.[0];
 	const last = entries.at(-1)?.model?.[0];
 	return {
-		model: agent?.model === undefined ? undefined : `${agent.model.provider}/${agent.model.modelId}`,
-		cwd: agent?.cwd,
+		conversationId: id,
+		parentId:
+			who.kind === "agent"
+				? who.record.parentConversationId
+				: who.kind === "fork"
+					? who.fork.parentConversationId
+					: undefined,
+		who,
+		name: who.kind === "agent" ? who.record.name : who.kind === "fork" ? who.fork.label : ROOT_NAME,
+		model: agent.model === undefined ? undefined : `${agent.model.provider}/${agent.model.modelId}`,
+		cwd: agent.cwd,
+		branch: who.kind === "main" && agent.cwd !== undefined ? gitBranch(agent.cwd) : undefined,
+		busy: live?.run !== undefined,
 		costUsd: totalCost(usage),
 		turns,
 		startedAt: first !== undefined && first.role !== "system" ? first.timestamp : undefined,
 		lastAt: last !== undefined && last.role !== "system" ? last.timestamp : undefined,
-		recent,
-		fork,
+		cells,
 	};
 }
 
-/** What the agents view draws; read at each render. */
+async function kindOf(
+	harness: Harness,
+	id: ConversationId,
+	rootId: ConversationId,
+	context: Context,
+): Promise<AgentKind | undefined> {
+	if (id === rootId) return { kind: "main" };
+	const [fork, self] = await Promise.all([readFork(harness, id, context), identityOf(harness, id, context)]);
+	if (fork !== undefined) return { kind: "fork", fork };
+	if (self === undefined) return undefined;
+	const record = (await harness.snapshot(AgentsDoc, self.parentConversationId, context))?.agents[self.name];
+	return record === undefined ? undefined : { kind: "agent", record };
+}
+
+/** What the dashboard draws; read at each render. */
 export interface AgentsSource {
-	readonly rows: readonly AgentRow[];
+	readonly rows: readonly DashboardRow[];
 	readonly selected: ConversationId | undefined;
 	readonly sessionCostUsd: number;
 	readonly sessionStartedAt: number;
 	readonly frame: number;
-	/** Shows a path with `~`. */
-	readonly tildify: (path: string) => string;
-	/** A message shown in place of the hint row, such as the outcome of a removal. */
+	/** What the inspector shows of `row` beyond the row itself. */
+	readonly extras: (row: DashboardRow) => InspectorExtras;
+	/** A message shown in place of the hint row, such as the outcome of a merge. */
 	readonly note: string | undefined;
 }
 
-/** What the agents view's keys do. */
+/** What the dashboard's keys do; each acts on the selected row. */
 export interface AgentsActions {
 	move(delta: number): void;
 	/** Make the selected conversation the main screen's. */
 	open(): void;
-	/** Remove the selected fork. */
+	diff(): void;
+	merge(): void;
+	stop(): void;
 	remove(): void;
 	back(): void;
 }
 
-const GLYPHS: Readonly<Record<AgentSection, (frame: number) => string>> = {
-	running: (frame) => theme.success(SPINNER[frame % SPINNER.length]!),
-	idle: () => theme.muted("◌"),
-	done: () => theme.muted("✓"),
-};
+type AgentsKey = Extract<MakoraKeybinding, `app.agents.${string}`>;
 
-/** The full-screen agents view: title row, list and detail, hint row. */
+const ACTION_KEYS: readonly (readonly [AgentsKey, "diff" | "merge" | "stop" | "remove"])[] = [
+	["app.agents.diff", "diff"],
+	["app.agents.merge", "merge"],
+	["app.agents.stop", "stop"],
+	["app.agents.remove", "remove"],
+];
+
+/** Below this width the inspector goes under the list. */
+const SIDE_BY_SIDE_FROM = 100;
+
+/** The full-screen dashboard: title row, list and inspector, hint row. */
 export class AgentsView implements Component {
 	readonly #source: () => AgentsSource;
 	readonly #actions: AgentsActions;
@@ -190,78 +201,69 @@ export class AgentsView implements Component {
 		else if (keys.matches(data, "tui.select.down")) this.#actions.move(1);
 		else if (keys.matches(data, "tui.select.confirm")) this.#actions.open();
 		else if (keys.matches(data, "tui.select.cancel")) this.#actions.back();
-		else if (keys.matches(data, "app.agents.remove")) this.#actions.remove();
+		else {
+			const action = ACTION_KEYS.find(([id]) => keys.matches(data, id))?.[1];
+			if (action !== undefined) this.#actions[action]();
+		}
 	}
 
-	/** The title row: `Agents · N running · M done`, and `$total · N req · elapsed`. */
+	/** `Agents · N running · M waiting on you · K done`, and `$total · N req · elapsed`. */
 	title(width: number): string {
 		const { rows, sessionCostUsd, sessionStartedAt } = this.#source();
-		const count = (status: AgentSection) => rows.filter((row) => row.status === status).length;
-		const requests = rows.reduce((sum, row) => sum + row.turns, 0);
-		const left = `${theme.bold(theme.accent("Agents"))}${theme.muted(` · ${count("running")} running · ${count("done")} done`)}`;
+		const count = (section: Section) => rows.filter((row) => row.section === section).length;
+		const requests = rows.reduce((sum, row) => sum + row.facts.turns, 0);
+		const counts = `${count("running")} running · ${count("waiting")} waiting on you · ${count("done")} done`;
+		const left = `${theme.bold(theme.accent("Agents"))}${theme.muted(` · ${counts}`)}`;
 		const right = theme.muted(
 			`${formatCost(sessionCostUsd)} · ${requests} req · ${formatElapsed(Date.now() - sessionStartedAt)}`,
 		);
 		return spread(left, right, width);
 	}
 
-	/** The hint row, from the select bindings, or the source's note. */
+	/** The hint row from the bindings, or the source's note. */
 	hint(): string {
 		const { note } = this.#source();
 		if (note !== undefined) return theme.warning(note);
 		const keys = getKeybindings();
-		const first = (id: "tui.select.up" | "tui.select.down" | "tui.select.confirm" | "tui.select.cancel") =>
-			keys.getKeys(id).slice(0, 1);
+		const first = (
+			id: AgentsKey | "tui.select.up" | "tui.select.down" | "tui.select.confirm" | "tui.select.cancel",
+		) => keys.getKeys(id).slice(0, 1);
 		return hintLine([
 			[[...first("tui.select.up"), ...first("tui.select.down")], "select"],
 			[first("tui.select.confirm"), "open"],
-			[keys.getKeys("app.agents.remove").slice(0, 1), "remove fork"],
+			...ACTION_KEYS.map(([id]) => [first(id), MAKORA_KEYBINDINGS[id].description] as const),
 			[first("tui.select.cancel"), "back"],
 		]);
 	}
 
 	render(width: number): string[] {
 		const source = this.#source();
-		const leftWidth = Math.max(30, Math.min(80, Math.floor(width * 0.58)));
-		const rightWidth = Math.max(10, width - leftWidth - 3);
-		const left = this.#list(source, leftWidth);
-		const selected = source.rows.find((row) => row.conversationId === source.selected) ?? source.rows[0];
-		const right = selected === undefined ? [] : detail(selected, source, rightWidth);
-		const height = Math.max(left.length, right.length);
-		const lines: string[] = [];
-		for (let index = 0; index < height; index++) {
-			const cell = left[index] ?? "";
-			const pad = " ".repeat(Math.max(0, leftWidth - visibleWidth(cell)));
-			lines.push(`${cell}${pad} ${theme.border("│")} ${right[index] ?? ""}`);
+		const selected = source.rows.find((row) => row.facts.conversationId === source.selected) ?? source.rows[0];
+		if (width < SIDE_BY_SIDE_FROM) {
+			const inspector = selected === undefined ? [] : inspectorLines(selected, source.extras(selected), width);
+			return [...this.#list(source, selected, width), theme.border("─".repeat(width)), ...inspector];
 		}
-		return lines;
+		const leftWidth = Math.min(84, Math.floor(width * 0.6));
+		const rightWidth = width - leftWidth - 3;
+		const left = this.#list(source, selected, leftWidth);
+		const right = selected === undefined ? [] : inspectorLines(selected, source.extras(selected), rightWidth);
+		return Array.from({ length: Math.max(left.length, right.length) }, (_, index) => {
+			const cell = left[index] ?? "";
+			return `${cell}${" ".repeat(Math.max(0, leftWidth - visibleWidth(cell)))} ${theme.border("│")} ${right[index] ?? ""}`;
+		});
 	}
 
-	#list(source: AgentsSource, width: number): string[] {
+	#list(source: AgentsSource, selected: DashboardRow | undefined, width: number): string[] {
 		const lines: string[] = [];
-		const now = Date.now();
-		for (const section of SECTIONS) {
+		for (const [section, title] of SECTIONS) {
 			const rows = source.rows.filter((row) => row.section === section);
 			if (rows.length === 0) continue;
 			if (lines.length > 0) lines.push("");
-			lines.push(` ${theme.dim(section.toUpperCase())}`);
+			lines.push(` ${theme.dim(title)}`);
 			for (const row of rows) {
-				const elapsed =
-					row.startedAt === undefined
-						? ""
-						: formatElapsed((row.status === "running" ? now : (row.lastAt ?? now)) - row.startedAt);
-				const name = `${"  ".repeat(row.depth)}${row.name}`;
-				const fixed = `${pad(formatCost(row.costUsd), 8)}${pad(elapsed, 7)}`;
-				const where = row.cwd === undefined ? "" : source.tildify(row.cwd);
-				// One column for the selection bar, two for the glyph, one before the fixed columns.
-				const middleWidth = Math.max(0, width - 3 - 16 - visibleWidth(fixed) - 1);
-				const middle = truncateToWidth(`${pad(row.model ?? "", 18)}${where}`, middleWidth, "…");
-				const text = `${pad(truncateToWidth(name, 15, "…"), 16)}${middle}${" ".repeat(Math.max(0, middleWidth - visibleWidth(middle)))} ${theme.muted(fixed)}`;
-				const glyph = GLYPHS[row.status](source.frame);
-				const isSelected = row.conversationId === (source.selected ?? source.rows[0]?.conversationId);
-				const line = `${glyph} ${text}`;
+				const line = `${glyph(row.state, source.frame)} ${rowText(row, width - 3)}`;
 				lines.push(
-					isSelected
+					row === selected
 						? `${theme.accent("▌")}${theme.band(`${line}${" ".repeat(Math.max(0, width - 1 - visibleWidth(line)))}`)}`
 						: ` ${line}`,
 				);
@@ -271,40 +273,32 @@ export class AgentsView implements Component {
 	}
 }
 
-function detail(row: AgentRow, source: AgentsSource, width: number): string[] {
-	const fit = (text: string) => truncateToWidth(text, width, "…");
-	const lines = [
-		fit(theme.bold(theme.accent(row.name))),
-		fit(theme.muted(`model  ${row.model ?? "none"}`)),
-		fit(theme.muted(`cwd    ${row.cwd === undefined ? "" : source.tildify(row.cwd)}`)),
-		...(row.fork === undefined ? [] : [fit(theme.muted(`files  ${describeFiles(row.fork.files)}`))]),
-		"",
-		fit(`${theme.text(formatCost(row.costUsd))}${theme.muted(` cost · ${row.turns} turns`)}`),
-		"",
-		theme.dim("RECENT"),
+/** Name, mode, branch or ref, model, budget bar, cost, age and running cell, in `width` columns. */
+function rowText(row: DashboardRow, width: number): string {
+	const { facts } = row;
+	const name = `${"  ".repeat(row.depth)}${facts.name}`;
+	const model = facts.model?.slice(facts.model.indexOf("/") + 1) ?? "";
+	const age = row.elapsedMs === undefined ? "" : formatElapsed(row.elapsedMs);
+	const cell = row.state === "queued" ? "queued" : row.cell === undefined ? "" : `cell ${row.cell}`;
+	const fixed = [
+		[theme.muted(model), 11],
+		[budgetBar(row.budget), 6],
+		[theme.text(formatCost(facts.costUsd)), 8],
+		[theme.muted(age), 7],
+		[theme.accent(cell), 7],
+	] as const;
+	const whereWidth = Math.max(4, width - 16 - 7 - fixed.reduce((sum, [, size]) => sum + size, 0));
+	const columns: (readonly [string, number])[] = [
+		[theme.text(name), 16],
+		[theme.muted(row.mode), 7],
+		[theme.muted(row.where), whereWidth],
+		...fixed,
 	];
-	if (row.recent.length === 0) lines.push(theme.muted("no tool calls yet"));
-	const now = Date.now();
-	for (const { at, cell } of row.recent) {
-		const time = new Date(at).toTimeString().slice(0, 5);
-		const summary = toolSummary(cell, Math.max(10, width - 6), now, source.frame);
-		const paint = summary.tone === "error" ? theme.error : summary.tone === "success" ? theme.success : theme.accent;
-		lines.push(`${theme.dim(time)} ${paint(summary.marker)} ${theme.text(summary.text)}`);
-	}
-	return lines;
+	return columns.map(([text, size]) => column(text, size)).join("");
 }
 
-function describeFiles(files: ForkFiles): string {
-	switch (files.kind) {
-		case "snapshot":
-			return `worktree at the fork point's snapshot (${files.commit.slice(0, 7)})`;
-		case "head":
-			return `worktree at HEAD (${files.commit.slice(0, 7)})`;
-		case "shared":
-			return "shares the original's folder";
-	}
-}
-
-function pad(text: string, width: number): string {
-	return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
+/** `text` cut or padded to `width` columns, with a space before the next column. */
+function column(text: string, width: number): string {
+	const fitted = truncateToWidth(text, width - 1, "…");
+	return `${fitted}${" ".repeat(Math.max(1, width - visibleWidth(fitted)))}`;
 }

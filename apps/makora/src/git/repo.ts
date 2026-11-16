@@ -39,9 +39,19 @@ async function git(cwd: string, args: readonly string[]): Promise<string> {
 const DIFF_ARGS = ["--no-color", "--no-ext-diff", "--no-relative", "-M", "--src-prefix=a/", "--dst-prefix=b/"];
 
 /** Working-tree changes not staged, untracked files after them. */
-export async function unstagedFiles(repo: Repo): Promise<DiffFile[]> {
+export function unstagedFiles(repo: Repo): Promise<DiffFile[]> {
+	return workingTreeFiles(repo, undefined);
+}
+
+/** Everything the working tree changed since `commit`, untracked files after them: a subagent's work on its base. */
+export function filesSince(repo: Repo, commit: string): Promise<DiffFile[]> {
+	return workingTreeFiles(repo, commit);
+}
+
+/** `git diff` of the working tree against the index, or against `commit` when given, then the untracked files. */
+async function workingTreeFiles(repo: Repo, commit: string | undefined): Promise<DiffFile[]> {
 	const [patch, others] = await Promise.all([
-		git(repo.root, ["diff", ...DIFF_ARGS]),
+		git(repo.root, ["diff", ...DIFF_ARGS, ...(commit === undefined ? [] : [commit])]),
 		git(repo.root, ["ls-files", "--others", "--exclude-standard", "-z"]),
 	]);
 	const paths = others.split("\0").filter((path) => path.length > 0);

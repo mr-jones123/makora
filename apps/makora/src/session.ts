@@ -1,5 +1,6 @@
 // One open session: its lock, its Durable harness over `session.sqlite` (or memory, when ephemeral), its root
 // conversation, and the Python kernels of its conversations.
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
 import { uuidv7 } from "@earendil-works/pi-ai";
@@ -16,6 +17,9 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { type Agents, createAgents } from "./agents/extension.ts";
+import { admitInput, identityOf } from "./agents/family.ts";
+import type { SetupPolicy, SetupRequest } from "./agents/worktree.ts";
 import { defaultModel, type MakoraApp } from "./app.ts";
 import { makoraExtension } from "./extension.ts";
 import { KernelManager } from "./kernel/manager.ts";
@@ -48,7 +52,10 @@ export interface MakoraSession {
 	readonly notices: readonly SessionNotice[];
 	/** Call `listener` with each later notice; returns the unsubscribe. */
 	onNotice(listener: (notice: SessionNotice) => void): () => void;
-	/** Submit user input to `conversation`; the session's first input becomes its title. */
+	/**
+	 * Submit user input to `conversation`; the session's first input becomes its title. A subagent takes it as a steer
+	 * while it runs and is woken by it once finished, so its anchor records the run; a queued or removed one refuses it.
+	 */
 	submit(conversation: Conversation, text: string, context: Context): Promise<Submission>;
 	/** Switch `conversation`'s model; the root's is recorded in the meta. */
 	setModel(conversation: Conversation, model: ModelRef, context: Context): Promise<void>;
@@ -59,6 +66,11 @@ export interface MakoraSession {
 /** What an open applies on top of the session's stored state. */
 export interface OpenOptions {
 	readonly model?: ModelRef;
+	/**
+	 * Ask the user whether a repository's worktree setup command may run; a yes is kept in the settings. Without it (print
+	 * mode), a command the settings do not approve is skipped.
+	 */
+	readonly askSetup?: (request: SetupRequest) => Promise<boolean>;
 }
 
 /** Where a session's state lives. */
@@ -112,6 +124,7 @@ async function open(
 	const dir = store.kind === "persistent" ? sessionDir(store.sessionsDir, meta.id) : undefined;
 	let kernels: KernelManager;
 	let repl: Repl;
+	let agents: Agents;
 	let harness: Harness;
 	try {
 		// Under the lock, so the kernels it kills can only be ones a crashed holder left.
@@ -121,6 +134,19 @@ async function open(
 		registry.install(CodingTools);
 		registry.install(makoraExtension(app.paths));
 		registry.install(repl.extension);
+		agents = createAgents({
+			kernels,
+			sessionId: meta.id,
+			defaultCwd: meta.cwd,
+			roots: () => ({
+				review: app.settings.worktrees.review ?? join(tmpdir(), "makora-worktrees"),
+				write: app.settings.worktrees.write ?? app.paths.worktrees,
+			}),
+			maxRunning: () => app.settings.maxRunningAgents,
+			setup: setupPolicy(app, options),
+			settingsFile: app.paths.settings,
+		});
+		registry.install(agents.extension);
 		const storage: Storage =
 			store.kind === "persistent"
 				? await openNodeSqliteStorage(sessionDatabase(store.sessionsDir, meta.id))
@@ -154,15 +180,16 @@ async function open(
 		root = await harness.root(context, {
 			agent: {
 				cwd: meta.cwd,
-				modelTools: [repl.python],
+				modelTools: [repl.python, agents.waitAgents],
 				...(initial === undefined ? {} : { model: initial }),
 				...(app.settings.thinkingLevel === undefined ? {} : { thinkingLevel: app.settings.thinkingLevel }),
 			},
 		});
-		// Sessions from before the REPL offered the coding tools to the model; the model now gets `python` only.
-		const offered = (await root.agent(context)).tools;
-		if (offered.length !== 1 || offered[0]?.name !== repl.python.name) {
-			await root.configure({ modelTools: [repl.python] }, context);
+		// Sessions from before the REPL offered the coding tools, and those from before subagents `python` alone; the
+		// model now gets `python` and `wait_agents`.
+		const offered = (await root.agent(context)).tools.map((tool) => tool.name);
+		if (offered.join() !== [repl.python.name, agents.waitAgents.name].join()) {
+			await root.configure({ modelTools: [repl.python, agents.waitAgents] }, context);
 		}
 		if (options.model !== undefined) await root.configure({ model: options.model }, context);
 		const unfinished = (await harness.inspect(context)).tasks.filter(
@@ -194,7 +221,25 @@ async function open(
 			return () => listeners.delete(listener);
 		},
 		async submit(conversation, text, submitContext) {
-			const submission = await conversation.submit({ type: "input", content: text }, submitContext);
+			const self = await identityOf(harness, conversation.id, submitContext);
+			// A subagent's input is admitted under its anchor's round, so the run it starts is watched and recorded.
+			const submission =
+				self === undefined
+					? await conversation.submit({ type: "input", content: text }, submitContext)
+					: await harness.submission(
+							await harness.commit(
+								(tx) =>
+									admitInput(
+										tx,
+										{ handle: conversation, self },
+										{ content: text, requestId: `user-input:${uuidv7()}`, from: "user" },
+										"followUp",
+									),
+								submitContext,
+							),
+							submitContext,
+						);
+			if (submission === undefined) throw new Error(`The input to ${self?.name} was not admitted`);
 			const title = current.title ?? (text.trim().split("\n")[0]?.slice(0, TITLE_LENGTH) || undefined);
 			current = update(current, title === undefined ? {} : { title });
 			return submission;
@@ -211,6 +256,19 @@ async function open(
 				lock?.release();
 			}
 		},
+	};
+}
+
+function setupPolicy(app: MakoraApp, options: OpenOptions): SetupPolicy {
+	return {
+		async approve(request) {
+			const approval = { repository: request.repository, sha256: request.sha256 };
+			if (app.settings.setupApproved(approval)) return true;
+			if (options.askSetup === undefined || !(await options.askSetup(request))) return false;
+			app.settings.approveSetup(approval);
+			return true;
+		},
+		timeoutMinutes: () => app.settings.setupTimeoutMinutes,
 	};
 }
 

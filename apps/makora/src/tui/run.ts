@@ -16,22 +16,27 @@ import {
 	type TuiInputListenerResult,
 	VStack,
 } from "@earendil-works/pi-tui";
+import type { SetupRequest } from "../agents/worktree.ts";
 import type { MakoraApp } from "../app.ts";
 import type { PlanUsage } from "../auth/types.ts";
 import { fetchPlanUsage } from "../auth/usage.ts";
 import type { SessionChoice } from "../cli-args.ts";
-import { ensureForkFiles, hasUncommittedChanges, listForks, removeFork } from "../fork.ts";
+import { ensureForkFiles } from "../fork.ts";
+import { filesSince, openRepo } from "../git/repo.ts";
 import { FAKE_MODEL } from "../models.ts";
 import { tildify } from "../paths.ts";
 import { gitBranch } from "../project.ts";
-import { type MakoraSession, openEphemeralSession, openSession } from "../session.ts";
+import { type MakoraSession, type OpenOptions, openEphemeralSession, openSession } from "../session.ts";
 import { createSession, latestSession, listSessions, readSession, type SessionMeta } from "../sessions.ts";
 import { discoverSkills, type Skill } from "../skills.ts";
 import { type AccountLabel, accountLabel } from "./account-label.ts";
-import { type AgentRow, AgentsView, loadAgentRows } from "./agents.ts";
+import { type ActionHost, type ActionOutcome, diffTarget, mergeRow, removeRow, stopRow } from "./agent-actions.ts";
+import { type AgentsSnapshot, AgentsView, countWorktrees, loadAgents } from "./agents.ts";
 import { dockLine, hintLine, Line, rule, statusLine, topBar } from "./bars.ts";
 import { type CommandHost, pickSession, runCommand, slashCommands } from "./commands.ts";
+import { type AgentKind, type DashboardRow, dashboardRows, whereOf } from "./dashboard.ts";
 import { Dialogs } from "./dialogs.ts";
+import type { SinceTab } from "./diff-state.ts";
 import { DiffView } from "./diff-view.ts";
 import { installKeybindings, keyName, MAKORA_KEYBINDINGS, type MakoraKeybinding } from "./keybindings.ts";
 import { RoundedEditor } from "./rounded-editor.ts";
@@ -67,6 +72,7 @@ const EXIT_CONFIRM_MS = 1500;
 type KeyAction = (tui: MakoraTui) => boolean;
 
 const APP_KEYS: readonly (readonly [MakoraKeybinding, KeyAction])[] = [
+	["app.back", (tui) => tui.backToMain()],
 	["app.interrupt", (tui) => tui.interrupt()],
 	["app.exit", (tui) => tui.exitIfEmpty()],
 	["app.cancel", (tui) => tui.cancel()],
@@ -99,12 +105,18 @@ class MakoraTui implements CommandHost {
 	#unsubscribeNotices: (() => void) | undefined;
 	/** The branch, or short commit, of the active conversation's folder. */
 	#branch: string | undefined;
-	/** Fork worktrees of the open session, for the dock. */
+	/** Worktrees of the open session's forks and subagents, for the dock. */
 	#worktrees = 0;
-	#agentRows: AgentRow[] = [];
-	#agentsLoading = false;
+	/** The dashboard's last read of the session's agents. */
+	#agents: AgentsSnapshot = { facts: [], messages: [] };
+	/** Each subagent's worktree changes against its base, read for the selected row. */
+	readonly #changes = new Map<ConversationId, { files: number; added: number; removed: number }>();
+	/** The dashboard's read in flight, which a poll joins rather than starting another. */
+	#agentsLoad: Promise<void> | undefined;
 	/** A message in the agents view's hint row, until its next key. */
 	#agentsNote: string | undefined;
+	/** The user's answer to each repository's worktree setup command, by repository and command hash. */
+	readonly #setupAnswers = new Map<string, Promise<boolean>>();
 	#account: AccountLabel | undefined;
 	#planUsage: PlanUsage | undefined;
 	#frame = 0;
@@ -166,27 +178,33 @@ class MakoraTui implements CommandHost {
 		]);
 		this.#agentsView = new AgentsView(
 			() => ({
-				rows: this.#agentRows,
+				rows: this.#rows(),
 				selected: this.#ui.view.kind === "agents" ? this.#ui.view.selected : undefined,
 				sessionCostUsd: this.#feed?.state.costUsd ?? 0,
 				sessionStartedAt: this.#feed?.session.meta.createdAt ?? Date.now(),
 				frame: this.#frame,
-				tildify,
+				extras: (row) => ({
+					kernel: this.#feed?.session.kernels.status(row.facts.conversationId) ?? { state: "none", variables: 0 },
+					messages: this.#agents.messages,
+					changes: this.#changes.get(row.facts.conversationId),
+					now: Date.now(),
+					frame: this.#frame,
+					tildify,
+				}),
 				note: this.#agentsNote,
 			}),
 			{
 				move: (delta) => {
 					this.#agentsNote = undefined;
-					this.dispatch({ type: "moveSelection", delta, order: this.#agentRows.map((row) => row.conversationId) });
+					this.dispatch({ type: "moveSelection", delta, order: this.#rowOrder() });
+					// The next poll reads them again.
+					void this.#readChanges().catch(() => {});
 				},
 				open: () => this.#openSelectedAgent(),
-				remove: () => {
-					this.#agentsNote = undefined;
-					void this.#removeSelectedFork().catch((error: unknown) => {
-						this.#agentsNote = describeError(error);
-						this.#tui.requestRender();
-					});
-				},
+				diff: () => this.#diffSelected(),
+				merge: () => this.#act(mergeRow),
+				stop: () => this.#act(stopRow),
+				remove: () => this.#act((host, row) => removeRow(host, row, this.#agents.facts)),
 				back: () => this.#closeView(),
 			},
 		);
@@ -202,7 +220,8 @@ class MakoraTui implements CommandHost {
 			render: () => this.#tui.requestRender(),
 			close: () => this.#closeView(),
 			ask: (text) => {
-				this.#closeView();
+				this.dispatch({ type: "showMain" });
+				this.#showView();
 				this.#editor.insertTextAtCursor(text);
 			},
 			confirm: (title, action) => this.#confirm(title, action),
@@ -267,7 +286,7 @@ class MakoraTui implements CommandHost {
 					: await openSession(
 							this.app,
 							meta ?? createSession(this.app.paths.sessions, this.#options.cwd),
-							{},
+							this.#openOptions(undefined),
 							BACKGROUND_CONTEXT,
 						);
 			await this.#closeSession();
@@ -278,12 +297,30 @@ class MakoraTui implements CommandHost {
 	}
 
 	#openEphemeral(model: ModelRef | undefined): Promise<MakoraSession> {
-		return openEphemeralSession(
-			this.app,
-			this.#options.cwd,
-			model === undefined ? {} : { model },
-			BACKGROUND_CONTEXT,
-		);
+		return openEphemeralSession(this.app, this.#options.cwd, this.#openOptions(model), BACKGROUND_CONTEXT);
+	}
+
+	#openOptions(model: ModelRef | undefined): OpenOptions {
+		return { ...(model === undefined ? {} : { model }), askSetup: (request) => this.#askSetup(request) };
+	}
+
+	/**
+	 * Ask once per repository and command whether its worktree setup may run: children prepared at the same time share
+	 * the question, and an answer holds until makora exits (a yes is kept in the settings beyond that).
+	 */
+	#askSetup(request: SetupRequest): Promise<boolean> {
+		const key = `${request.repository}\0${request.sha256}`;
+		let answer = this.#setupAnswers.get(key);
+		if (answer === undefined) {
+			const detail = [
+				`${tildify(request.repository)} asks to run this command in each new subagent worktree:`,
+				`$ ${request.command}`,
+				"It runs as you, without provider API keys in its environment. makora remembers a yes for this repository until the command changes.",
+			].join("\n");
+			answer = this.#confirm("Run this repository's worktree setup?", "Approve and run it", detail);
+			this.#setupAnswers.set(key, answer);
+		}
+		return answer;
 	}
 
 	async submit(text: string): Promise<void> {
@@ -326,6 +363,16 @@ class MakoraTui implements CommandHost {
 		return true;
 	}
 
+	/** On another agent's conversation, make the main one active again; elsewhere the key goes on. */
+	backToMain(): boolean {
+		const feed = this.#feed;
+		// An open autocomplete menu takes the key to close itself.
+		if (this.#editor.capturesViewportInput || feed === undefined || feed.conversation.id === feed.session.root.id)
+			return false;
+		void this.activate(feed.session.root.id).catch((error: unknown) => this.notice(describeError(error)));
+		return true;
+	}
+
 	interrupt(): boolean {
 		// An open autocomplete menu takes the key to close itself.
 		if (this.#editor.capturesViewportInput || !this.#feed?.state.busy) return false;
@@ -354,18 +401,39 @@ class MakoraTui implements CommandHost {
 
 	openAgents(): boolean {
 		this.dispatch({ type: "openAgents" });
-		this.#tui.setLayoutRoot(this.#agentsRoot);
-		this.#tui.setFocus(this.#agentsView);
-		void this.#loadAgents();
+		this.#showView();
 		return true;
 	}
 
 	openDiff(): boolean {
-		this.dispatch({ type: "openDiff" });
-		this.#diffView.open(this.#feed?.state.cwd ?? this.#options.cwd);
-		this.#tui.setLayoutRoot(this.#diffView);
-		this.#tui.setFocus(this.#diffView);
+		this.#openDiffOn(this.#feed?.state.cwd ?? this.#options.cwd, undefined);
 		return true;
+	}
+
+	/** Open the diff view over the current screen on `cwd`, starting on a tab against `since` when given. */
+	#openDiffOn(cwd: string, since: SinceTab | undefined): void {
+		this.dispatch({ type: "openDiff" });
+		this.#diffView.open(cwd, since);
+		this.#showView();
+	}
+
+	/** Put the current view's screen on display and focus it. */
+	#showView(): void {
+		switch (this.#ui.view.kind) {
+			case "main":
+				this.#tui.setLayoutRoot(this.#mainRoot);
+				this.#tui.setFocus(this.#editor);
+				break;
+			case "agents":
+				this.#tui.setLayoutRoot(this.#agentsRoot);
+				this.#tui.setFocus(this.#agentsView);
+				void this.#loadAgents();
+				break;
+			case "diff":
+				this.#tui.setLayoutRoot(this.#diffView);
+				this.#tui.setFocus(this.#diffView);
+				break;
+		}
 	}
 
 	command(text: string): boolean {
@@ -409,7 +477,7 @@ class MakoraTui implements CommandHost {
 	}
 
 	async #open(meta: SessionMeta, model: ModelRef | undefined): Promise<void> {
-		await this.#adopt(await openSession(this.app, meta, model === undefined ? {} : { model }, BACKGROUND_CONTEXT));
+		await this.#adopt(await openSession(this.app, meta, this.#openOptions(model), BACKGROUND_CONTEXT));
 	}
 
 	/** Show `session` with its root conversation active. */
@@ -437,16 +505,14 @@ class MakoraTui implements CommandHost {
 		this.#tui.requestRender();
 	}
 
-	/** Count the session's fork worktrees for the dock. */
+	/** Count the session's live fork and subagent worktrees for the dock. */
 	#countWorktrees(session: MakoraSession): void {
-		void listForks(session.harness, BACKGROUND_CONTEXT).then(
-			(forks) => {
-				this.#worktrees = forks.filter(
-					(fork) => !fork.record.removed && fork.record.files.kind !== "shared",
-				).length;
+		void countWorktrees(session.harness, BACKGROUND_CONTEXT).then(
+			(count) => {
+				this.#worktrees = count;
 				this.#tui.requestRender();
 			},
-			// The count is a hint; a closed session's read fails by design, and the next switch or removal counts again.
+			// The count is a hint; a closed session's read fails by design, and the next tick counts again.
 			() => {},
 		);
 	}
@@ -472,7 +538,10 @@ class MakoraTui implements CommandHost {
 			this.#refreshAccount();
 			this.#tui.requestRender();
 		}
-		if (this.#ui.view.kind === "agents" && this.#frame % 8 === 0) void this.#loadAgents();
+		if (this.#frame % 8 === 0) {
+			if (this.#ui.view.kind === "agents") void this.#loadAgents();
+			else if (this.#feed !== undefined) this.#countWorktrees(this.#feed.session);
+		}
 		if (
 			this.#ui.view.kind === "main" &&
 			state?.hasEarlier === true &&
@@ -519,80 +588,134 @@ class MakoraTui implements CommandHost {
 		};
 	}
 
-	async #loadAgents(): Promise<void> {
+	/** The dashboard's rows from its last read, as of now. */
+	#rows(): DashboardRow[] {
+		return dashboardRows(this.#agents.facts, Date.now());
+	}
+
+	#rowOrder(): ConversationId[] {
+		return this.#rows().map((row) => row.facts.conversationId);
+	}
+
+	#selectedRow(): DashboardRow | undefined {
+		const rows = this.#rows();
+		const selected = this.#ui.view.kind === "agents" ? this.#ui.view.selected : undefined;
+		return rows.find((row) => row.facts.conversationId === selected) ?? rows[0];
+	}
+
+	#loadAgents(): Promise<void> {
+		this.#agentsLoad ??= this.#readAgents().finally(() => {
+			this.#agentsLoad = undefined;
+		});
+		return this.#agentsLoad;
+	}
+
+	/** Read the agents once more after the read in flight, which may have started before a change the list must show. */
+	async #reloadAgents(): Promise<void> {
+		await this.#agentsLoad;
+		await this.#loadAgents();
+	}
+
+	async #readAgents(): Promise<void> {
 		const feed = this.#feed;
-		if (feed === undefined || this.#agentsLoading) return;
-		this.#agentsLoading = true;
+		if (feed === undefined) return;
 		try {
-			this.#agentRows = await loadAgentRows(
-				feed.session.harness,
-				feed.session.root.id,
-				feed.state.graph,
-				BACKGROUND_CONTEXT,
-			);
+			this.#agents = await loadAgents(feed.session.harness, feed.session.root.id, BACKGROUND_CONTEXT);
 			if (this.#ui.view.kind === "agents" && this.#ui.view.selected === undefined)
-				this.dispatch({ type: "moveSelection", delta: 0, order: this.#agentRows.map((row) => row.conversationId) });
+				this.dispatch({ type: "moveSelection", delta: 0, order: this.#rowOrder() });
+			await this.#readChanges();
 			this.#tui.requestRender();
 		} catch {
 			// Deliberately quiet: a replaced feed's session is closed, the view polls again within a second, and Durable
 			// reports storage failures as session notices.
-		} finally {
-			this.#agentsLoading = false;
 		}
 	}
 
+	/** Read the selected subagent's worktree changes against its base commit for the inspector. */
+	async #readChanges(): Promise<void> {
+		const row = this.#selectedRow();
+		const who = row?.facts.who;
+		if (row === undefined || who?.kind !== "agent" || who.record.worktree.kind !== "worktree") return;
+		const { root, baseCommit } = who.record.worktree;
+		const repo = await openRepo(root);
+		// A queued agent has no worktree yet, and a removed one none any more.
+		if (repo === undefined) return;
+		const files = await filesSince(repo, baseCommit);
+		this.#changes.set(row.facts.conversationId, {
+			files: files.length,
+			added: files.reduce((sum, file) => sum + file.added, 0),
+			removed: files.reduce((sum, file) => sum + file.removed, 0),
+		});
+		this.#tui.requestRender();
+	}
+
 	#openSelectedAgent(): void {
-		const selected = this.#ui.view.kind === "agents" ? this.#ui.view.selected : undefined;
+		const selected = this.#selectedRow()?.facts.conversationId;
 		this.#closeView();
 		if (selected !== undefined)
 			void this.activate(selected).catch((error: unknown) => this.notice(describeError(error)));
 	}
 
-	/** `x` in the agents view: confirm, warning about uncommitted changes, then remove the selected fork. */
-	async #removeSelectedFork(): Promise<void> {
-		const feed = this.feed();
-		const selected = this.#ui.view.kind === "agents" ? this.#ui.view.selected : undefined;
-		const row = this.#agentRows.find((candidate) => candidate.conversationId === selected) ?? this.#agentRows[0];
+	/** `d`: the diff view on the selected agent's work, against its base commit; Esc comes back here. */
+	#diffSelected(): void {
+		this.#agentsNote = undefined;
+		const row = this.#selectedRow();
 		if (row === undefined) return;
-		if (row.fork === undefined) {
-			this.#agentsNote =
-				row.conversationId === feed.session.root.id
-					? "The main conversation cannot be removed."
-					: "Only forks can be removed.";
+		const target = diffTarget(row);
+		if (target.kind === "refused") {
+			this.#agentsNote = target.note;
 			this.#tui.requestRender();
 			return;
 		}
-		const fork = { conversationId: row.conversationId, record: row.fork };
-		const { label, files } = fork.record;
-		const title =
-			files.kind === "shared"
-				? `Remove ${label}? Its folder is shared and stays.`
-				: (await hasUncommittedChanges(fork))
-					? `${label} has uncommitted changes in ${tildify(files.path)}. Remove it and discard them?`
-					: `Remove ${label} and its worktree ${tildify(files.path)}?`;
-		if (!(await this.#confirm(title, `Remove ${label}`))) return;
-		if (this.#feed?.conversation.id === fork.conversationId) await this.activate(feed.session.root.id);
-		await removeFork(feed.session, fork, BACKGROUND_CONTEXT);
-		await this.#feeds.get(fork.conversationId)?.stop();
-		this.#feeds.delete(fork.conversationId);
-		this.#countWorktrees(feed.session);
-		this.#agentsNote = `Removed ${label}.`;
-		await this.#loadAgents();
-		this.dispatch({ type: "moveSelection", delta: 0, order: this.#agentRows.map((each) => each.conversationId) });
+		this.#openDiffOn(target.cwd, target.since);
 	}
 
-	async #confirm(title: string, action: string): Promise<boolean> {
-		const choice = await this.dialogs.select(title, [
-			{ value: "confirm", label: action },
-			{ value: "cancel", label: "Cancel" },
-		]);
+	/**
+	 * Run a dashboard action on the selected row, let go of what it removed, and show its outcome once the list is read
+	 * from the state the action committed, so the outcome never stands next to a row it changed.
+	 */
+	#act(action: (host: ActionHost, row: DashboardRow) => Promise<ActionOutcome>): void {
+		this.#agentsNote = undefined;
+		const row = this.#selectedRow();
+		const feed = this.#feed;
+		if (row === undefined || feed === undefined) return;
+		const host: ActionHost = {
+			session: feed.session,
+			confirm: (title, label, detail) => this.#confirm(title, label, detail),
+		};
+		void action(host, row)
+			.then(async ({ note, removed }) => {
+				if (removed.includes(this.feed().conversation.id)) await this.activate(feed.session.root.id);
+				for (const id of removed) {
+					await this.#feeds.get(id)?.stop();
+					this.#feeds.delete(id);
+				}
+				this.#countWorktrees(feed.session);
+				await this.#reloadAgents();
+				this.#agentsNote = note;
+				this.dispatch({ type: "moveSelection", delta: 0, order: this.#rowOrder() });
+			})
+			.catch((error: unknown) => {
+				this.#agentsNote = describeError(error);
+				this.#tui.requestRender();
+			});
+	}
+
+	async #confirm(title: string, action: string, detail?: string): Promise<boolean> {
+		const choice = await this.dialogs.select(
+			title,
+			[
+				{ value: "confirm", label: action },
+				{ value: "cancel", label: "Cancel" },
+			],
+			detail === undefined ? {} : { message: detail },
+		);
 		return choice?.value === "confirm";
 	}
 
 	#closeView(): void {
 		this.dispatch({ type: "closeView" });
-		this.#tui.setLayoutRoot(this.#mainRoot);
-		this.#tui.setFocus(this.#editor);
+		this.#showView();
 	}
 
 	#refreshAccount(): void {
@@ -637,7 +760,7 @@ class MakoraTui implements CommandHost {
 		const feed = this.#feed;
 		return topBar(
 			{
-				fork: feed?.fork?.label,
+				viewing: feed === undefined ? undefined : this.#viewing(feed),
 				title: feed?.session.meta.title,
 				cwd: tildify(feed?.state.cwd ?? this.#options.cwd),
 				costUsd: feed?.state.costUsd ?? 0,
@@ -645,6 +768,21 @@ class MakoraTui implements CommandHost {
 			},
 			width,
 		);
+	}
+
+	/** `viewing <name> · <mode> · <branch> · esc back to main` on a fork or subagent; undefined on the main one. */
+	#viewing(feed: SessionFeed): string | undefined {
+		const who: AgentKind | undefined =
+			feed.agent !== undefined
+				? { kind: "agent", record: feed.agent }
+				: feed.fork !== undefined
+					? { kind: "fork", fork: feed.fork }
+					: undefined;
+		if (who === undefined) return undefined;
+		const [name, mode] = who.kind === "agent" ? [who.record.name, who.record.mode] : [who.fork.label, "fork"];
+		const back = getKeybindings().getKeys("app.back")[0];
+		const parts = [`viewing ${name}`, mode, whereOf(who, undefined)];
+		return [...parts, ...(back === undefined ? [] : [`${keyName(back)} back to main`])].join(" · ");
 	}
 
 	#dock(): string {
@@ -688,8 +826,10 @@ class MakoraTui implements CommandHost {
 			const cancel = keys.getKeys("app.cancel")[0];
 			return theme.warning(`press ${cancel === undefined ? "it" : keyName(cancel)} again to exit`);
 		}
+		const feed = this.#feed;
+		const viewing = feed !== undefined && feed.conversation.id !== feed.session.root.id;
 		const ids: readonly MakoraKeybinding[] = [
-			"app.interrupt",
+			viewing ? "app.back" : "app.interrupt",
 			"app.tools.expand",
 			"app.agents",
 			"app.diff",

@@ -6,6 +6,7 @@ import {
 	baseBranch,
 	baseFiles,
 	commitFiles,
+	filesSince,
 	history,
 	openRepo,
 	type Repo,
@@ -15,7 +16,7 @@ import {
 	unstage,
 	unstagedFiles,
 } from "../git/repo.ts";
-import { hintLine, spread } from "./bars.ts";
+import { fitStart, hintLine, spread } from "./bars.ts";
 import { askBlock } from "./diff-ask.ts";
 import { type Doc, type DocRow, fileDoc, type LineStyle, rowTarget, stackedDoc } from "./diff-doc.ts";
 import {
@@ -30,6 +31,7 @@ import {
 	listEntries,
 	OPENING,
 	reduceDiff,
+	type SinceTab,
 	type TabContent,
 } from "./diff-state.ts";
 import type { MakoraKeybinding } from "./keybindings.ts";
@@ -41,7 +43,7 @@ export interface DiffHost {
 	rows(): number;
 	/** Schedule a frame. */
 	render(): void;
-	/** Back to the main screen. */
+	/** Back to the screen the view was opened from. */
 	close(): void;
 	/** Back to the main screen with `text` inserted into the editor. */
 	ask(text: string): void;
@@ -130,10 +132,13 @@ export class DiffView implements Component {
 		this.#host = host;
 	}
 
-	/** Find the repository holding `cwd` and load the current tab. */
-	open(cwd: string): void {
+	/**
+	 * Find the repository holding `cwd` and load the current tab. With `since`, the view gets a tab of the working tree
+	 * against that commit and starts on it.
+	 */
+	open(cwd: string, since?: SinceTab): void {
 		this.#cwd = cwd;
-		void this.#open(cwd).catch((error: unknown) => this.#dispatch({ type: "message", text: describe(error) }));
+		void this.#open(cwd, since).catch((error: unknown) => this.#dispatch({ type: "message", text: describe(error) }));
 	}
 
 	invalidate(): void {}
@@ -171,7 +176,7 @@ export class DiffView implements Component {
 		return lines.map((line) => truncateToWidth(line, width, "…"));
 	}
 
-	async #open(cwd: string): Promise<void> {
+	async #open(cwd: string, since: SinceTab | undefined): Promise<void> {
 		const repo = await openRepo(cwd);
 		this.#repo = repo;
 		if (repo === undefined) {
@@ -182,10 +187,11 @@ export class DiffView implements Component {
 		const tabs: DiffTab[] = [
 			{ kind: "working" },
 			{ kind: "staged" },
+			...(since === undefined ? [] : [since]),
 			...(base === undefined ? [] : [{ kind: "base", base } as const]),
 			{ kind: "history" },
 		];
-		this.#dispatch({ type: "opened", repo: repo.name, tabs });
+		this.#dispatch({ type: "opened", repo: repo.name, tabs, start: since === undefined ? 0 : 2 });
 		await this.#load();
 	}
 
@@ -441,6 +447,8 @@ async function loadTab(repo: Repo, tab: DiffTab): Promise<TabContent> {
 			return { kind: "files", entries: entries(await stagedFiles(repo), "staged") };
 		case "base":
 			return { kind: "files", entries: entries(await baseFiles(repo, tab.base), "readonly") };
+		case "since":
+			return { kind: "files", entries: entries(await filesSince(repo, tab.commit), "readonly") };
 		case "history":
 			return {
 				kind: "history",
@@ -458,6 +466,8 @@ function tabLabel(tab: DiffTab): string {
 			return "Staged";
 		case "base":
 			return `vs ${tab.base}`;
+		case "since":
+			return `vs ${tab.label}`;
 		case "history":
 			return "History";
 	}
@@ -604,14 +614,6 @@ function clean(text: string): string {
 		shown += char === "\t" ? "    " : code < 0x20 ? String.fromCharCode(0x2400 + code) : code === 0x7f ? "␡" : char;
 	}
 	return shown;
-}
-
-/** `text` cut from the start to `width` columns, so a path keeps its file name. */
-function fitStart(text: string, width: number): string {
-	if (visibleWidth(text) <= width) return text;
-	const chars = [...text];
-	while (chars.length > 0 && visibleWidth(chars.join("")) > width - 1) chars.shift();
-	return `…${chars.join("")}`;
 }
 
 function relativeTime(date: number, now: number): string {

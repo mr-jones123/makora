@@ -11,7 +11,7 @@ export interface HomePaths {
 	readonly keybindings: string;
 	readonly agents: string;
 	readonly skills: string;
-	/** Fork worktrees: `<repo>-<hash>/<session>/<conversation>`. */
+	/** Fork worktrees, and write subagents' by default: `<repo>-<hash>/<session>/<conversation>`. */
 	readonly worktrees: string;
 }
 

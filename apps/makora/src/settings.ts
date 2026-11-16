@@ -1,5 +1,6 @@
-// User settings in `<home>/settings.json`: the default model, thinking level, and REPL snapshots. Read through getters
-// at each use, so an edit by `/model`, `/thinking`, or another process applies without a restart.
+// User settings in `<home>/settings.json`: the default model, thinking level, REPL snapshots, subagent worktrees and
+// limits, and the worktree setup commands the user approved. Read through getters at each use, so an edit by
+// `/model`, `/thinking`, or another process applies without a restart.
 import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
@@ -11,18 +12,41 @@ export interface MakoraSettings {
 	readonly thinkingLevel?: ModelThinkingLevel;
 	/** Whether persistent sessions snapshot REPL variables after each cell; default true. */
 	readonly snapshots?: boolean;
+	/** Where subagent worktrees go; defaults are the temp folder (review) and `<home>/worktrees` (write). */
+	readonly worktrees?: { readonly review?: string; readonly write?: string };
+	readonly agents?: {
+		/** Children running at once per session; further ones queue. Default 4. */
+		readonly maxRunning?: number;
+		/** How long a repository's worktree setup command may run before it is killed. Default 10. */
+		readonly setupTimeoutMinutes?: number;
+		/** The worktree setup commands the user let run, each for one repository. */
+		readonly approvedSetups?: readonly SetupApproval[];
+	};
 }
+
+/** A repository's worktree setup command the user approved: the repository's top level and the command's SHA-256. */
+export type SetupApproval = { readonly repository: string; readonly sha256: string };
 
 /** Live view of `settings.json`. */
 export interface SettingsFile {
 	readonly model: ModelRef | undefined;
 	readonly thinkingLevel: ModelThinkingLevel | undefined;
 	readonly snapshots: boolean;
+	readonly worktrees: { readonly review?: string; readonly write?: string };
+	readonly maxRunningAgents: number;
+	readonly setupTimeoutMinutes: number;
+	/** Whether the user approved `approval`'s command for its repository. */
+	setupApproved(approval: SetupApproval): boolean;
 	/** Write `change` over the current file; `undefined` fields stay as they are. */
 	update(change: MakoraSettings): void;
+	/** Add `approval` to the approved setup commands, unless it is there. */
+	approveSetup(approval: SetupApproval): void;
 	/** Harness run policy, read live from this file. */
 	readonly harness: HarnessSettings;
 }
+
+const DEFAULT_MAX_RUNNING = 4;
+const DEFAULT_SETUP_TIMEOUT_MINUTES = 10;
 
 /** A live view of the settings file at `file`; a missing or unreadable file reads as empty settings. */
 export function openSettings(file: string): SettingsFile {
@@ -42,6 +66,16 @@ export function openSettings(file: string): SettingsFile {
 		compaction: { enabled: true },
 		toolExecution: "parallel",
 	};
+	const update = (change: MakoraSettings): void => {
+		const defined = Object.entries(change).filter(([, value]) => value !== undefined);
+		const next = { ...current(), ...Object.fromEntries(defined) };
+		const temporary = `${file}.${process.pid}.tmp`;
+		writeFileSync(temporary, `${JSON.stringify(next, null, "\t")}\n`);
+		renameSync(temporary, file);
+		cached = undefined;
+	};
+	const setupApproved = ({ repository, sha256 }: SetupApproval): boolean =>
+		(current().agents?.approvedSetups ?? []).some((each) => each.repository === repository && each.sha256 === sha256);
 	return {
 		get model() {
 			return current().model;
@@ -52,13 +86,21 @@ export function openSettings(file: string): SettingsFile {
 		get snapshots() {
 			return current().snapshots ?? true;
 		},
-		update(change) {
-			const defined = Object.entries(change).filter(([, value]) => value !== undefined);
-			const next = { ...current(), ...Object.fromEntries(defined) };
-			const temporary = `${file}.${process.pid}.tmp`;
-			writeFileSync(temporary, `${JSON.stringify(next, null, "\t")}\n`);
-			renameSync(temporary, file);
-			cached = undefined;
+		get worktrees() {
+			return current().worktrees ?? {};
+		},
+		get maxRunningAgents() {
+			return current().agents?.maxRunning ?? DEFAULT_MAX_RUNNING;
+		},
+		get setupTimeoutMinutes() {
+			return current().agents?.setupTimeoutMinutes ?? DEFAULT_SETUP_TIMEOUT_MINUTES;
+		},
+		setupApproved,
+		update,
+		approveSetup(approval) {
+			if (setupApproved(approval)) return;
+			const agents = current().agents;
+			update({ agents: { ...agents, approvedSetups: [...(agents?.approvedSetups ?? []), approval] } });
 		},
 		harness,
 	};
@@ -75,8 +117,10 @@ function readJson(file: string): unknown {
 // `settings.json` is user-edited: the trust boundary of settings.
 function parseSettings(raw: unknown): MakoraSettings {
 	if (typeof raw !== "object" || raw === null) return {};
-	const { model, thinkingLevel, snapshots } = raw as Record<string, unknown>;
-	const settings: { model?: ModelRef; thinkingLevel?: ModelThinkingLevel; snapshots?: boolean } = {};
+	const { model, thinkingLevel, snapshots, worktrees, agents } = raw as Record<string, unknown>;
+	const settings: {
+		-readonly [Key in keyof MakoraSettings]: MakoraSettings[Key];
+	} = {};
 	if (typeof model === "object" && model !== null) {
 		const { provider, modelId } = model as Record<string, unknown>;
 		if (typeof provider === "string" && typeof modelId === "string") settings.model = { provider, modelId };
@@ -84,5 +128,29 @@ function parseSettings(raw: unknown): MakoraSettings {
 	const level = MODEL_THINKING_LEVELS.find((candidate) => candidate === thinkingLevel);
 	if (level !== undefined) settings.thinkingLevel = level;
 	if (typeof snapshots === "boolean") settings.snapshots = snapshots;
+	if (typeof worktrees === "object" && worktrees !== null) {
+		const { review, write } = worktrees as Record<string, unknown>;
+		settings.worktrees = {
+			...(typeof review === "string" ? { review } : {}),
+			...(typeof write === "string" ? { write } : {}),
+		};
+	}
+	if (typeof agents === "object" && agents !== null) settings.agents = parseAgents(agents as Record<string, unknown>);
 	return settings;
+}
+
+function parseAgents(raw: Record<string, unknown>): NonNullable<MakoraSettings["agents"]> {
+	const { maxRunning, setupTimeoutMinutes, approvedSetups } = raw;
+	const approved = Array.isArray(approvedSetups)
+		? approvedSetups.flatMap((each: unknown) => {
+				if (typeof each !== "object" || each === null) return [];
+				const { repository, sha256 } = each as Record<string, unknown>;
+				return typeof repository === "string" && typeof sha256 === "string" ? [{ repository, sha256 }] : [];
+			})
+		: [];
+	return {
+		...(typeof maxRunning === "number" && Number.isInteger(maxRunning) && maxRunning >= 1 ? { maxRunning } : {}),
+		...(typeof setupTimeoutMinutes === "number" && setupTimeoutMinutes > 0 ? { setupTimeoutMinutes } : {}),
+		...(approved.length === 0 ? {} : { approvedSetups: approved }),
+	};
 }

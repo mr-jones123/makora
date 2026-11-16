@@ -23,6 +23,14 @@ export interface InputOptions {
 	readonly signal?: AbortSignal;
 }
 
+/** Options of a selector dialog. */
+export interface SelectOptions {
+	/** Text above the choices, wrapped: what the choice is about when the title cannot hold it. */
+	readonly message?: string;
+	/** Closes the dialog with `undefined` when aborted. */
+	readonly signal?: AbortSignal;
+}
+
 /** Shows dialogs as overlays on `tui`; each call resolves when the user answers or cancels (`undefined`). */
 export class Dialogs {
 	readonly #tui: TUI;
@@ -32,8 +40,8 @@ export class Dialogs {
 	}
 
 	/** Let the user pick one of `items`; typing filters them. */
-	select(title: string, items: readonly SelectItem[], signal?: AbortSignal): Promise<SelectItem | undefined> {
-		return this.#show(signal, (finish) => new SelectDialog(title, items, finish));
+	select(title: string, items: readonly SelectItem[], options: SelectOptions = {}): Promise<SelectItem | undefined> {
+		return this.#show(options.signal, (finish) => new SelectDialog(title, items, options.message, finish));
 	}
 
 	/** Ask the user for a line of text. */
@@ -91,13 +99,20 @@ class SelectDialog implements Component {
 	readonly capturesViewportInput = true;
 	readonly #title: string;
 	readonly #items: readonly SelectItem[];
+	readonly #message: string | undefined;
 	readonly #finish: (item: SelectItem | undefined) => void;
 	#filter = "";
 	#list: SelectList;
 
-	constructor(title: string, items: readonly SelectItem[], finish: (item: SelectItem | undefined) => void) {
+	constructor(
+		title: string,
+		items: readonly SelectItem[],
+		message: string | undefined,
+		finish: (item: SelectItem | undefined) => void,
+	) {
 		this.#title = title;
 		this.#items = items;
+		this.#message = message;
 		this.#finish = finish;
 		this.#list = this.#build();
 	}
@@ -127,7 +142,18 @@ class SelectDialog implements Component {
 			[keys.getKeys("tui.select.confirm").slice(0, 1), "choose"],
 			[keys.getKeys("tui.select.cancel").slice(0, 1), "cancel"],
 		]);
-		return framed(this.#title, [filter, "", ...this.#list.render(Math.max(1, width - 4))], hint, width);
+		const inner = Math.max(1, width - 4);
+		const message =
+			this.#message === undefined
+				? []
+				: [
+						...this.#message
+							.split("\n")
+							.flatMap((line) => wrapTextWithAnsi(line, inner))
+							.map(theme.text),
+						"",
+					];
+		return framed(this.#title, [...message, filter, "", ...this.#list.render(inner)], hint, width);
 	}
 
 	#build(): SelectList {

@@ -1,6 +1,13 @@
 // Transcript rows: a conversation's committed entries and live state turned into the rows a transcript shows.
 import type { AssistantMessage, Message, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { EntryRecord, LiveState, NestedToolSlot, ToolSlot } from "@earendil-works/pi-durable";
+import {
+	AGENT_MESSAGE_ENTRY,
+	AGENT_RESULT_ENTRY,
+	type AgentMessageData,
+	type AgentResultData,
+	describeState,
+} from "./agents/prompts.ts";
 import { pythonDetails } from "./repl/details.ts";
 import type { NestedCell, ToolCell, ToolCellStatus } from "./tool-cell.ts";
 
@@ -10,6 +17,8 @@ export type TranscriptRow =
 	| { readonly kind: "assistant"; readonly key: string; readonly text: string; readonly streaming: boolean }
 	| { readonly kind: "thinking"; readonly key: string; readonly text: string }
 	| { readonly kind: "tool"; readonly key: string; readonly cell: ToolCell }
+	/** A subagent's result or a message from another agent: a title line and its text. */
+	| { readonly kind: "agent"; readonly key: string; readonly title: string; readonly text: string }
 	/** Run failures, retries, compaction and restore notices. */
 	| { readonly kind: "notice"; readonly key: string; readonly message: string };
 
@@ -138,6 +147,21 @@ function entryRows(
 		case "pi.assistant": {
 			const message = entry.model?.[0];
 			return message?.role === "assistant" ? assistantRows(message, key, false, results, running) : [];
+		}
+		case AGENT_RESULT_ENTRY: {
+			// Written by the anchor's report.
+			const data = entry.data as AgentResultData;
+			return [{ kind: "agent", key, title: `${data.name} · ${data.state.kind}`, text: describeState(data.state) }];
+		}
+		case AGENT_MESSAGE_ENTRY: {
+			// Written by `send`.
+			const data = entry.data as AgentMessageData;
+			return [{ kind: "agent", key, title: `message from ${data.from} (${data.relationship})`, text: data.text }];
+		}
+		case "makora.notice": {
+			// Written by the anchor: how a child's worktree setup went, or that its command is not approved.
+			const data = entry.data as { readonly text: string };
+			return [{ kind: "notice", key, message: data.text }];
 		}
 		case "pi.compaction":
 			return [{ kind: "notice", key, message: "Context compacted: earlier turns were summarized." }];
