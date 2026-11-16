@@ -1,16 +1,19 @@
 // The quiz page: the data it shows (the checked bank, each question's options shuffled, the commits' diffs capped per
-// file with the annotated lines kept and their notes placed) and the self-contained HTML file made from the app's
-// template with that data embedded.
+// file with the annotated lines kept, their notes placed and numbered in page order, and the rows "notes only" shows)
+// and the self-contained HTML file made from the app's template with that data embedded.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { DiffFile, FileStatus } from "../git/diff.ts";
-import type { CitedQuestion, Decision, Note, QuizContent, SummarizedCommit } from "./bank.ts";
+import type { Cite, CitedQuestion, Decision, Note, QuizContent, SummarizedCommit } from "./bank.ts";
 import { type DiffRow, diffRows, findLine } from "./diff-rows.ts";
 
 /** A row of a file on the page: a diff row, or a run of rows left out between two shown ones. */
 export type PageRow = DiffRow | { readonly kind: "gap"; readonly hidden: number };
 
-/** A note placed on the page: `row` indexes its file's `rows`, `index` is its place in the bank's annotations. */
+/**
+ * A note placed on the page: `row` indexes its file's `rows`, and `index` is its place in page order (commits oldest
+ * first, then files as listed, then rows), which is also what a `note` cite indexes.
+ */
 export type PageNote = Omit<Note, "sha" | "path"> & { readonly index: number; readonly row: number };
 
 /**
@@ -28,10 +31,13 @@ export type PageFile = {
 	readonly more: number;
 	/** Why the file has no rows: a binary file, or a diff git did not produce. */
 	readonly reason?: string;
+	/** In row order. */
 	readonly notes: readonly PageNote[];
+	/** What "notes only" shows: inclusive `[from, to]` ranges of `rows`, each note's row and the rows around it, merged. */
+	readonly focus: readonly (readonly [number, number])[];
 };
 
-/** A commit of the page with its files. */
+/** A commit of the page with its files, annotated ones first. */
 export type PageCommit = SummarizedCommit & { readonly files: readonly PageFile[] };
 
 /** Everything the page shows; embedded as JSON and drawn by the template's script. */
@@ -62,27 +68,46 @@ export const FILE_LINE_CAP = 300;
 /** Rows shown before and after an annotated line that the cap would hide. */
 export const NOTE_CONTEXT = 12;
 
+/** Rows "notes only" shows before and after each annotated line. */
+export const FOCUS_CONTEXT = 3;
+
 /**
- * The page for `content`: diffs capped per file, each note on its line (which is shown even past the cap), and each
- * question's options in a fresh random order.
+ * The page for `content`: diffs capped per file, annotated files first, each note on its line (which is shown even
+ * past the cap) and numbered in page order, and each question's options in a fresh random order.
  */
 export function buildPage(content: QuizContent, sources: PageSources): QuizPage {
 	const notes = content.notes.map((note, index) => ({ ...note, index }));
+	// Notes still carry their bank index here; page order is known only once every file is placed and sorted.
+	const placed = content.commits.map((commit) => {
+		const files = (sources.files.get(commit.sha) ?? []).map((file) =>
+			pageFile(
+				file,
+				notes.filter((note) => note.sha === commit.sha && note.path === file.path),
+			),
+		);
+		return { ...commit, files: files.sort((a, b) => Number(b.notes.length > 0) - Number(a.notes.length > 0)) };
+	});
+	const order = new Map<number, number>();
+	for (const commit of placed) {
+		for (const file of commit.files) for (const note of file.notes) order.set(note.index, order.size);
+	}
+	const renumber = (cites: readonly Cite[]): Cite[] =>
+		cites.map((cite) => (cite.kind === "note" ? { ...cite, index: order.get(cite.index)! } : cite));
 	return {
 		project: sources.project,
 		range: content.range,
 		createdAt: sources.createdAt,
-		commits: content.commits.map((commit) => ({
+		commits: placed.map((commit) => ({
 			...commit,
-			files: (sources.files.get(commit.sha) ?? []).map((file) =>
-				pageFile(
-					file,
-					notes.filter((note) => note.sha === commit.sha && note.path === file.path),
-				),
-			),
+			files: commit.files.map((file) => ({
+				...file,
+				notes: file.notes.map((note) => ({ ...note, index: order.get(note.index)!, cites: renumber(note.cites) })),
+			})),
 		})),
 		decisions: content.decisions,
-		questions: content.questions.map((question) => shuffleOptions(question, sources.random)),
+		questions: content.questions.map((question) =>
+			shuffleOptions({ ...question, cites: renumber(question.cites) }, sources.random),
+		),
 	};
 }
 
@@ -112,8 +137,10 @@ function pageFile(file: DiffFile, notes: readonly (Note & { readonly index: numb
 		added: file.added,
 		removed: file.removed,
 	};
-	if (file.body.kind === "binary") return { ...base, rows: [], more: 0, reason: "binary file", notes: [] };
-	if (file.body.kind === "omitted") return { ...base, rows: [], more: 0, reason: file.body.reason, notes: [] };
+	if (file.body.kind === "binary") return { ...base, rows: [], more: 0, reason: "binary file", notes: [], focus: [] };
+	if (file.body.kind === "omitted") {
+		return { ...base, rows: [], more: 0, reason: file.body.reason, notes: [], focus: [] };
+	}
 	const all = diffRows(file);
 	const targets = notes.map((note) => findLine(all, note.side, note.line));
 	const shown = new Set(Array.from({ length: Math.min(all.length, FILE_LINE_CAP) }, (_, at) => at));
@@ -131,12 +158,29 @@ function pageFile(file: DiffFile, notes: readonly (Note & { readonly index: numb
 		rows.push(all[at]!);
 		previous = at;
 	}
+	const placedNotes = notes
+		.map(({ sha: _, path: __, ...note }, at) => ({ ...note, row: placed.get(targets[at]!)! }))
+		.sort((a, b) => a.row - b.row);
 	return {
 		...base,
 		rows,
 		more: all.length - 1 - previous,
-		notes: notes.map(({ sha: _, path: __, ...note }, at) => ({ ...note, row: placed.get(targets[at]!)! })),
+		notes: placedNotes,
+		focus: focusRanges(placedNotes, rows.length),
 	};
+}
+
+// Each note's row and FOCUS_CONTEXT rows either side, clamped to the file; ranges that touch or overlap merge.
+function focusRanges(notes: readonly { readonly row: number }[], rows: number): [number, number][] {
+	const ranges: [number, number][] = [];
+	for (const { row } of notes) {
+		const from = Math.max(0, row - FOCUS_CONTEXT);
+		const to = Math.min(rows - 1, row + FOCUS_CONTEXT);
+		const last = ranges.at(-1);
+		if (last !== undefined && from <= last[1] + 1) last[1] = Math.max(last[1], to);
+		else ranges.push([from, to]);
+	}
+	return ranges;
 }
 
 const TEMPLATE = fileURLToPath(new URL("../../assets/quiz/template.html", import.meta.url));

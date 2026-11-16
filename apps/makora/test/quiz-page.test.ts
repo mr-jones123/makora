@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DiffFile, DiffLine } from "../src/git/diff.ts";
 import type { Note, QuizContent } from "../src/quiz/bank.ts";
-import { buildPage, FILE_LINE_CAP, NOTE_CONTEXT, type QuizPage, renderPage, shuffleOptions } from "../src/quiz/page.ts";
+import {
+	buildPage,
+	FILE_LINE_CAP,
+	FOCUS_CONTEXT,
+	NOTE_CONTEXT,
+	type QuizPage,
+	renderPage,
+	shuffleOptions,
+} from "../src/quiz/page.ts";
 
 /** A seeded generator in [0, 1) (mulberry32), so a failing permutation can be replayed. */
 function seeded(seed: number): () => number {
@@ -141,7 +149,7 @@ describe("the page's diffs", () => {
 		assert.deepEqual(
 			shortPage!.notes.map((each) => [each.index, each.comment, shortPage!.rows[each.row]]),
 			[
-				[0, "short.ts old 2", { kind: "del", oldNo: 2, text: "old" }],
+				[1, "short.ts old 2", { kind: "del", oldNo: 2, text: "old" }],
 				[2, "short.ts new 2", { kind: "add", newNo: 2, text: "new" }],
 			],
 		);
@@ -151,6 +159,86 @@ describe("the page's diffs", () => {
 		assert.deepEqual(longPage!.rows[FILE_LINE_CAP], { kind: "gap", hidden: 350 - NOTE_CONTEXT - FILE_LINE_CAP });
 		assert.equal(longPage!.rows.length, FILE_LINE_CAP + 1 + 2 * NOTE_CONTEXT + 1);
 		assert.equal(longPage!.more, 400 - 350 - NOTE_CONTEXT);
+		assert.equal(placed!.index, 0);
+	});
+
+	it("numbers notes in page order, lists annotated files first, and points note cites at the new numbers", () => {
+		const lines = (count: number): DiffLine[] =>
+			Array.from({ length: count }, (_, index) => ({ kind: "add", newNo: index + 1, text: `line ${index + 1}` }));
+		const second = {
+			...content().commits[0]!,
+			sha: "def5678def5678def5678def5678def5678def56",
+			subject: "fix: later",
+		};
+		const note = (sha: string, path: string, line: number, cites: Note["cites"] = []): Note => ({
+			sha,
+			path,
+			side: "new",
+			line,
+			comment: `${path}:${line}`,
+			cites,
+		});
+		// Bank order: the later commit first, rows out of order, and a note citing another by its bank index.
+		const notes = [
+			note(second.sha, "c.ts", 2),
+			note(SHA, "b.ts", 9),
+			note(SHA, "b.ts", 3, [{ kind: "note", text: "c.ts:2", index: 0 }]),
+		];
+		const base = content("ordinary", notes);
+		const questions = base.questions.map((question) => ({
+			...question,
+			cites: [{ kind: "note" as const, text: "b.ts:9", index: 1 }],
+		}));
+		const files = new Map([
+			[SHA, [textFile("a.ts", lines(5)), textFile("b.ts", lines(20))]],
+			[second.sha, [textFile("c.ts", lines(5))]],
+		]);
+		const page = buildPage(
+			{ ...base, commits: [...base.commits, { ...second, summary: "later" }], questions },
+			{ project: "demo", createdAt: 0, files, random: Math.random },
+		);
+		assert.deepEqual(
+			page.commits.map((commit) => commit.files.map((file) => file.path)),
+			[["b.ts", "a.ts"], ["c.ts"]],
+		);
+		const walked = page.commits.flatMap((commit) =>
+			commit.files.flatMap((file) => file.notes.map((each) => [each.index, each.comment])),
+		);
+		assert.deepEqual(walked, [
+			[0, "b.ts:3"],
+			[1, "b.ts:9"],
+			[2, "c.ts:2"],
+		]);
+		assert.deepEqual(page.commits[0]!.files[0]!.notes[0]!.cites, [{ kind: "note", text: "c.ts:2", index: 2 }]);
+		assert.deepEqual(page.questions[0]!.cites, [{ kind: "note", text: "b.ts:9", index: 1 }]);
+	});
+
+	it("keeps exactly the annotated rows and FOCUS_CONTEXT rows either side for notes only, merged", () => {
+		const lines = Array.from(
+			{ length: 40 },
+			(_, index): DiffLine => ({ kind: "add", newNo: index + 1, text: `${index}` }),
+		);
+		const at = (line: number): Note => ({ sha: SHA, path: "f.ts", side: "new", line, comment: "c", cites: [] });
+		const files = new Map([[SHA, [textFile("f.ts", lines)]]]);
+		const page = buildPage(content("ordinary", [at(30), at(2), at(6), at(40)]), {
+			project: "demo",
+			createdAt: 0,
+			files,
+			random: Math.random,
+		});
+		const [file] = page.commits[0]!.files;
+		// The hunk header is row 0 and line n is row n. Notes on rows 2 and 6 touch and merge; 40 is the last row.
+		assert.equal(FOCUS_CONTEXT, 3);
+		assert.deepEqual(file!.focus, [
+			[0, 9],
+			[27, 33],
+			[37, 40],
+		]);
+		const kept = file!.focus.flatMap(([from, to]) => Array.from({ length: to - from + 1 }, (_, step) => from + step));
+		const expected = [...new Set(file!.notes.flatMap((note) => [-3, -2, -1, 0, 1, 2, 3].map((d) => note.row + d)))]
+			.filter((row) => row >= 0 && row < file!.rows.length)
+			.sort((a, b) => a - b);
+		assert.deepEqual(kept, expected);
 	});
 });
 

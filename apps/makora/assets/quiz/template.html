@@ -99,6 +99,31 @@ del { color: var(--bad); text-decoration: none; }
 .section-head h2 { margin: 0; }
 .small { padding: 4px 12px; font-size: 0.85rem; }
 .flash { outline: 2px solid var(--accent); }
+.note-box.flash { outline-offset: -2px; background: var(--accent-soft); }
+.marker { padding: 4px 10px; color: var(--muted); font: italic 12.5px/1.45 var(--mono); border-top: 1px solid var(--line); background: var(--bg); }
+.toggles { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.toggles [aria-pressed="true"] { background: var(--accent); color: var(--card); }
+.notes-only .commit:not(.has-notes), .notes-only .file:not(.has-notes) { display: none; }
+.notes-index { margin-top: 28px; padding: 0; }
+.notes-index > summary { cursor: pointer; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.index-title { font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+#notes-count { font-weight: 700; }
+.index-hint { color: var(--muted); font-size: 0.85rem; }
+.index-groups { border-top: 1px solid var(--line); padding: 6px 16px 14px; }
+.index-commit { margin-top: 12px; }
+.index-head { font-weight: 600; overflow-wrap: anywhere; }
+.index-file { margin: 6px 0 0 14px; }
+.index-path { font: 0.8rem var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.index-file ol { margin: 4px 0 0; padding-left: 30px; display: grid; gap: 2px; }
+.index-file li::marker { color: var(--muted); font-size: 0.85rem; }
+.index-file a { display: block; padding: 3px 6px; border-radius: 6px; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; font-size: 0.9rem; }
+.index-file a:hover, .index-file a:focus-visible { background: var(--accent-soft); }
+.index-ref { color: var(--accent); font-size: 0.82em; }
+.index-file a code:not(.index-ref) { font-size: 0.85em; padding: 0 3px; border-radius: 4px; background: var(--accent-soft); }
+.note-pill { position: fixed; right: 16px; bottom: 16px; z-index: 10; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); box-shadow: 0 4px 16px rgb(0 0 0 / 0.18); font-size: 0.9rem; }
+.note-pill button { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 6px 10px; border-radius: 999px; font-size: 0.85rem; }
+.note-pill button:hover { background: var(--accent-soft); }
+#pill-position { padding: 0 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .decision { padding: 12px 14px; scroll-margin-top: 16px; }
 .decision strong { display: block; }
 .decision span { color: var(--muted); }
@@ -148,6 +173,10 @@ del { color: var(--bad); text-decoration: none; }
 	.commit-head .stat { grid-column: 2; white-space: normal; }
 	.summary { padding-left: 42px; }
 	.board { grid-template-columns: repeat(5, 1fr); }
+	.section-head { flex-wrap: wrap; }
+	.note-pill { right: 8px; bottom: 8px; font-size: 0.8rem; }
+	.index-file { margin-left: 4px; }
+	.index-file ol { padding-left: 24px; }
 }
 </style>
 </head>
@@ -158,10 +187,16 @@ del { color: var(--bad); text-decoration: none; }
 		<h1 id="project"></h1>
 		<p class="meta" id="meta"></p>
 	</header>
+	<details class="card notes-index" id="notes-index" hidden>
+		<summary><span class="index-title">Notes</span> <span id="notes-count"></span> <span class="index-hint">jump with n and p</span></summary>
+	</details>
 	<section aria-labelledby="changes-title">
 		<div class="section-head">
 			<h2 id="changes-title">What changed</h2>
-			<button type="button" class="secondary small" id="notes-toggle" aria-pressed="false" hidden>Expand all notes</button>
+			<div class="toggles">
+				<button type="button" class="secondary small" id="notes-only" aria-pressed="false" hidden>Notes only</button>
+				<button type="button" class="secondary small" id="notes-toggle" aria-pressed="false" hidden>Expand all notes</button>
+			</div>
 		</div>
 		<ol class="commits" id="commits"></ol>
 	</section>
@@ -180,6 +215,11 @@ del { color: var(--bad); text-decoration: none; }
 		<div class="card results" id="results" hidden></div>
 	</section>
 </main>
+<nav class="note-pill" id="note-pill" aria-label="Notes" hidden>
+	<button type="button" id="pill-previous" aria-label="Previous note (p)">◀</button>
+	<span id="pill-position"></span>
+	<button type="button" id="pill-next" aria-label="Next note (n)">▶</button>
+</nav>
 <script id="quiz-data" type="application/json">__MAKORA_QUIZ_DATA__</script>
 <script>
 "use strict";
@@ -229,13 +269,13 @@ function header() {
 
 const commitViews = [];
 const noteHomes = new Map();
+const allNotes = [];
+let notesOnly = false;
 
 function commits() {
 	const list = document.getElementById("commits");
-	quiz.commits.forEach((commit, commitIndex) => {
+	for (const commit of quiz.commits) {
 		const notes = commit.files.reduce((sum, file) => sum + file.notes.length, 0);
-		// Annotated files come first and open with their commit.
-		const files = commit.files.map((file, fileIndex) => ({ file, fileIndex })).sort((a, b) => Number(b.file.notes.length > 0) - Number(a.file.notes.length > 0));
 		const box = el("div", { class: "files", hidden: true });
 		const head = el(
 			"button",
@@ -245,22 +285,36 @@ function commits() {
 			el("span", { class: "subject" }, commit.subject),
 			el("span", { class: "stat" }, stat(commit.added, commit.removed), ` \u00b7 ${count(commit.files.length, "file")}`, notes > 0 ? [" ", el("span", { class: "notes-badge" }, count(notes, "note"))] : ""),
 		);
-		const row = el("li", { class: "card commit", id: `commit-${shortSha(commit.sha)}` }, head, el("p", { class: "summary" }, commit.summary), box);
-		const view = { commit, row, head, box, files, notes, fileViews: new Map() };
+		const row = el("li", { class: `card commit${notes > 0 ? " has-notes" : ""}`, id: `commit-${shortSha(commit.sha)}` }, head, el("p", { class: "summary" }, commit.summary), box);
+		const view = { commit, row, head, box, notes, fileViews: new Map() };
 		commitViews.push(view);
-		for (const { file, fileIndex } of files) for (const note of file.notes) noteHomes.set(note.index, { view, fileIndex });
+		commit.files.forEach((file, fileIndex) => {
+			for (const note of file.notes) {
+				noteHomes.set(note.index, { view, fileIndex });
+				allNotes.push({ note, commit, file });
+			}
+		});
 		head.addEventListener("click", () => setOpen(view, !row.hasAttribute("data-open")));
 		list.append(row);
-	});
+	}
 	const annotated = commitViews.filter((view) => view.notes > 0);
-	const toggle = document.getElementById("notes-toggle");
 	if (annotated.length === 0) return;
-	toggle.hidden = false;
-	toggle.addEventListener("click", () => {
-		const expand = toggle.getAttribute("aria-pressed") !== "true";
-		for (const view of annotated) setOpen(view, expand);
-		toggle.setAttribute("aria-pressed", String(expand));
-		toggle.textContent = expand ? "Collapse all notes" : "Expand all notes";
+	const expand = document.getElementById("notes-toggle");
+	expand.hidden = false;
+	expand.addEventListener("click", () => {
+		const on = expand.getAttribute("aria-pressed") !== "true";
+		for (const view of annotated) setOpen(view, on);
+		expand.setAttribute("aria-pressed", String(on));
+		expand.textContent = on ? "Collapse all notes" : "Expand all notes";
+	});
+	const only = document.getElementById("notes-only");
+	only.hidden = false;
+	only.addEventListener("click", () => {
+		notesOnly = only.getAttribute("aria-pressed") !== "true";
+		only.setAttribute("aria-pressed", String(notesOnly));
+		list.classList.toggle("notes-only", notesOnly);
+		if (notesOnly) for (const view of annotated) setOpen(view, true);
+		for (const view of commitViews) for (const fileView of view.fileViews.values()) fileView.redraw();
 	});
 }
 
@@ -269,57 +323,90 @@ function setOpen(view, open) {
 	view.head.setAttribute("aria-expanded", String(open));
 	view.box.hidden = !open;
 	if (!open || view.box.childElementCount > 0) return;
-	if (view.files.length === 0) view.box.append(el("div", { class: "aside" }, "No file changes."));
-	for (const { file, fileIndex } of view.files) {
+	if (view.commit.files.length === 0) view.box.append(el("div", { class: "aside" }, "No file changes."));
+	view.commit.files.forEach((file, fileIndex) => {
 		const fileView = makeFileView(file);
 		view.fileViews.set(fileIndex, fileView);
 		view.box.append(fileView.details);
 		if (file.notes.length > 0) fileView.open();
-	}
+	});
 }
 
 function makeFileView(file) {
 	const name = file.oldPath === undefined ? file.path : `${file.oldPath} \u2192 ${file.path}`;
-	const details = el(
-		"details",
-		{ class: "file" },
-		el(
-			"summary",
-			{},
-			el("span", { class: "badge" }, file.status),
-			el("span", { class: "path" }, name),
-			file.notes.length > 0 ? el("span", { class: "notes-badge" }, count(file.notes.length, "note")) : "",
-			el("span", { class: "stat" }, stat(file.added, file.removed)),
-		),
+	const summary = el(
+		"summary",
+		{},
+		el("span", { class: "badge" }, file.status),
+		el("span", { class: "path" }, name),
+		file.notes.length > 0 ? el("span", { class: "notes-badge" }, count(file.notes.length, "note")) : "",
+		el("span", { class: "stat" }, stat(file.added, file.removed)),
 	);
-	const render = () => {
-		if (details.childElementCount > 1) return;
+	const details = el("details", { class: `file${file.notes.length > 0 ? " has-notes" : ""}` }, summary);
+	let drawn;
+	const draw = () => {
+		const mode = notesOnly && file.notes.length > 0 ? "focus" : "full";
+		if (drawn === mode) return;
+		details.replaceChildren(summary);
+		drawn = mode;
 		if (file.reason !== undefined) return details.append(el("div", { class: "aside" }, file.reason));
-		const notesAt = new Map();
-		for (const note of file.notes) notesAt.set(note.row, [...(notesAt.get(note.row) || []), note]);
-		let chunk = el("div", { class: "diff" });
-		details.append(chunk);
-		file.rows.forEach((row, index) => {
-			const notes = notesAt.get(index);
-			chunk.append(rowView(row, notes !== undefined));
-			if (notes === undefined) return;
-			for (const note of notes) details.append(noteView(note));
-			chunk = el("div", { class: "diff" });
-			details.append(chunk);
-		});
-		if (chunk.childElementCount === 0) chunk.remove();
-		if (file.more > 0) details.append(el("div", { class: "aside" }, `truncated, ${count(file.more, "more line")}`));
+		const after = drawRows(details, file, mode === "focus" ? file.focus : [[0, file.rows.length - 1]]);
+		if (mode === "focus" && after + file.more > 0) details.append(marker(after + file.more));
+		if (mode === "full" && file.more > 0) details.append(el("div", { class: "aside" }, `truncated, ${count(file.more, "more line")}`));
 	};
 	details.addEventListener("toggle", () => {
-		if (details.open) render();
+		if (details.open) draw();
 	});
 	return {
 		details,
 		open() {
-			render();
+			draw();
 			details.open = true;
 		},
+		redraw() {
+			if (drawn !== undefined) draw();
+		},
 	};
+}
+
+// The diff lines `rows[from, to)` stand for: a gap row its hidden count, a hunk header none.
+function linesIn(rows, from, to) {
+	let lines = 0;
+	for (let index = from; index < to; index++) lines += rows[index].kind === "gap" ? rows[index].hidden : rows[index].kind === "hunk" ? 0 : 1;
+	return lines;
+}
+
+function marker(lines) {
+	return el("div", { class: "marker" }, `\u22ef ${count(lines, "line")}`);
+}
+
+// Draws the rows of each inclusive `[from, to]` range, a marker for the lines between ranges, and each note right
+// after its row; returns the lines after the last range. Each run of rows is its own horizontal scroller, so a note
+// box between two runs spans the file's width and wraps.
+function drawRows(details, file, ranges) {
+	const notesAt = new Map();
+	for (const note of file.notes) notesAt.set(note.row, [...(notesAt.get(note.row) || []), note]);
+	let chunk;
+	const startChunk = () => {
+		chunk = el("div", { class: "diff" });
+		details.append(chunk);
+	};
+	let next = 0;
+	for (const [from, to] of ranges) {
+		const hidden = linesIn(file.rows, next, from);
+		if (hidden > 0) details.append(marker(hidden));
+		startChunk();
+		for (let index = from; index <= to; index++) {
+			const notes = notesAt.get(index);
+			chunk.append(rowView(file.rows[index], notes !== undefined));
+			if (notes === undefined) continue;
+			for (const note of notes) details.append(noteView(note));
+			startChunk();
+		}
+		next = to + 1;
+	}
+	for (const empty of details.querySelectorAll(".diff:empty")) empty.remove();
+	return linesIn(file.rows, next, file.rows.length);
 }
 
 const MARKS = { add: "+", del: "-", context: " " };
@@ -345,10 +432,59 @@ function noteView(note) {
 	return el(
 		"div",
 		{ class: "note-box", id: `note-${note.index + 1}` },
-		el("div", { class: "note-label" }, `note \u00b7 ${note.side} line ${note.line}`),
+		el("div", { class: "note-label" }, `note ${note.index + 1} \u00b7 ${note.side} line ${note.line}`),
 		el("p", {}, richText(note.comment)),
 		note.cites.length > 0 ? el("div", { class: "cites" }, "Sources:", note.cites.map(citeView)) : "",
 	);
+}
+
+function notesIndex() {
+	if (allNotes.length === 0) return;
+	const section = document.getElementById("notes-index");
+	section.hidden = false;
+	document.getElementById("notes-count").textContent = count(allNotes.length, "note");
+	const groups = el("div", { class: "index-groups" });
+	for (const view of commitViews.filter((each) => each.notes > 0)) {
+		const files = view.commit.files.filter((file) => file.notes.length > 0);
+		groups.append(
+			el(
+				"div",
+				{ class: "index-commit" },
+				el("div", { class: "index-head" }, el("code", { class: "sha" }, shortSha(view.commit.sha)), " ", view.commit.subject),
+				files.map((file) =>
+					el(
+						"div",
+						{ class: "index-file" },
+						el("div", { class: "index-path" }, file.path),
+						el(
+							"ol",
+							{},
+							file.notes.map((note) =>
+								el(
+									"li",
+									{ value: note.index + 1 },
+									el(
+										"a",
+										{
+											href: `#note-${note.index + 1}`,
+											onclick: (event) => {
+												event.preventDefault();
+												revealNote(note.index);
+											},
+										},
+										el("code", { class: "index-ref" }, `${file.path}:${note.line}`),
+										" ",
+										el("span", {}, richText(note.comment.split("\n")[0])),
+									),
+								),
+							),
+						),
+					),
+				),
+			),
+		);
+	}
+	section.append(groups);
 }
 
 function decisions() {
@@ -374,11 +510,47 @@ function reveal(target) {
 	flash(row);
 }
 
+// The note last jumped to; undefined until the first jump.
+let current;
+
 function revealNote(index) {
 	const home = noteHomes.get(index);
+	if (home === undefined) return;
 	setOpen(home.view, true);
 	home.view.fileViews.get(home.fileIndex).open();
 	flash(document.getElementById(`note-${index + 1}`));
+	current = index;
+	history.replaceState(null, "", `#note-${index + 1}`);
+	document.getElementById("pill-position").textContent = `note ${index + 1} / ${allNotes.length}`;
+}
+
+// Without a jump yet, the first drawn note below the top of the viewport is where reading is.
+function stepNote(step) {
+	if (current !== undefined) return revealNote(Math.min(allNotes.length - 1, Math.max(0, current + step)));
+	const drawn = [...document.querySelectorAll(".note-box")].map((box) => ({ index: Number(box.id.slice(5)) - 1, top: box.getBoundingClientRect().top }));
+	const below = drawn.filter((each) => each.top >= 0).sort((a, b) => a.index - b.index)[0];
+	if (step > 0) return revealNote(below === undefined ? 0 : below.index);
+	const above = drawn.filter((each) => each.top < 0).sort((a, b) => b.index - a.index)[0];
+	if (above !== undefined) revealNote(above.index);
+	else if (below !== undefined) revealNote(Math.max(0, below.index - 1));
+}
+
+const STEP_KEYS = { n: 1, j: 1, p: -1, k: -1 };
+
+function notePill() {
+	if (allNotes.length === 0) return;
+	const pill = document.getElementById("note-pill");
+	pill.hidden = false;
+	document.getElementById("pill-position").textContent = `${count(allNotes.length, "note")}`;
+	document.getElementById("pill-previous").addEventListener("click", () => stepNote(-1));
+	document.getElementById("pill-next").addEventListener("click", () => stepNote(1));
+	document.addEventListener("keydown", (event) => {
+		const step = STEP_KEYS[event.key];
+		if (step === undefined || event.ctrlKey || event.metaKey || event.altKey) return;
+		if (event.target.closest("input, textarea, select, [contenteditable]")) return;
+		event.preventDefault();
+		stepNote(step);
+	});
 }
 
 function citeView(cite) {
@@ -527,11 +699,15 @@ function retake() {
 
 header();
 commits();
+notesIndex();
+notePill();
 decisions();
 questions();
 progress();
 document.getElementById("submit").addEventListener("click", submit);
 document.getElementById("retake").addEventListener("click", retake);
+const linked = location.hash.match(/^#note-(\d+)$/);
+if (linked !== null) revealNote(Number(linked[1]) - 1);
 </script>
 </body>
 </html>

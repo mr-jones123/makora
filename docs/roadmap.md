@@ -150,7 +150,7 @@ Open items of the quiz:
 | Item | Needs |
 | --- | --- |
 | Quiz results are not kept: a score lives only in the page | The memory system, which decides what the owner's results feed into |
-| A page holds every diff of its range (4.1 MB for makora's 11 commits and 40 comments) | A cap per commit, or a more compact row encoding, if larger ranges make pages slow |
+| A page holds every diff of its range (4.2 MB for makora's 12 commits and 45 comments) | A cap per commit, or a more compact row encoding, if larger ranges make pages slow |
 | `/quiz all` leaves finding the project's first commit to the agent | A project setting, if the agent's choice proves unreliable |
 
 ## Later phases (planned)

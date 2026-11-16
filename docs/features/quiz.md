@@ -62,14 +62,19 @@ One scroll page, readable at 900 px and on a phone, light or dark with the syste
 
 - **Header.** The project, the range, the dates of its first and last commit, the commit count and `+added −removed`
   lines.
+- **Notes.** A collapsed index under the header, titled with the count (`Notes 45 notes`). Opened, it lists every
+  comment grouped by commit (short sha and subject), then by file, each entry with its `file:line` and the first line
+  of the comment. Clicking an entry opens the commit and the file and jumps straight to the comment.
 - **What changed.** One row per commit, oldest first: short sha, subject, the agent's summary, its stat and a
   `N notes` badge. Clicking a row lists its files, annotated ones first and already open, each with its own `N notes`
   badge; every file opens to its diff, colored, with old and new line numbers, at most 300 lines and a `truncated, N
   more lines` note after them. An annotated line past those 300 is still shown, with 12 lines either side and `⋯ N
   lines not shown` where lines are left out. An annotated line is highlighted, and its comment sits right under it
-  across the file's width: a small `note · new line 42` label, the comment, and its sources as links. On a phone the
-  code scrolls sideways and the comment wraps. **Expand all notes** opens every commit that has notes, and **Collapse
-  all notes** closes them again. The diffs come from git, not from the agent.
+  across the file's width: a small `note 22 · new line 128` label, the comment, and its sources as links. On a phone
+  the code scrolls sideways and the comment wraps. **Expand all notes** opens every commit that has notes, and
+  **Collapse all notes** closes them again. **Notes only** hides the commits and files without comments and shows
+  only each annotated line with 3 lines either side, with `⋯ N lines` between; pressed again, it restores the full
+  diffs. The diffs come from git, not from the agent.
 - **Decisions.** The title and one line of each decision.
 - **Questions.** The 10 questions, each with its category and 4 options in an order makora shuffled for that question.
   A counter shows how many are answered.
@@ -79,6 +84,21 @@ One scroll page, readable at 900 px and on a phone, light or dark with the syste
   source opens the commit and the file and jumps to that comment. Unanswered questions
   count as wrong and say so. An "Incorrect answers — review these" block repeats each missed question with your answer.
 - **Retake** clears the answers and shuffles every question's options again.
+
+### Getting to the comments without scrolling
+
+Comments are numbered in page order: by commit, oldest first, then by file as listed, then by line. Besides the index
+and **Notes only**:
+
+- **The note pill.** Bottom right, once the page has comments: `◀ note 3 / 45 ▶`, or the count before the first jump.
+  The arrows jump to the previous or next comment, opening its commit and file when they are collapsed, and the
+  comment flashes briefly.
+- **Keys.** `n` or `j` jumps to the next comment, `p` or `k` to the previous one. The keys do nothing while focus is in
+  an input such as an answer's radio button, or with Ctrl, Cmd or Alt held.
+- **Where "next" starts.** From the last comment jumped to, by the pill, a key, the index or a question's source.
+  Before any jump, from the first comment drawn below the top of the window, or from comment 1 when none is drawn.
+- **Links.** Each jump puts `#note-22` in the address, so reloading the page or sharing that link opens the commit and
+  file and lands on comment 22.
 
 The grade scale is lesson-quiz's:
 
@@ -97,8 +117,8 @@ request. It works the same opened from disk later, or sent to someone else.
 
 `~/.makora/quizzes/<repo>-<hash>/<YYYY-MM-DD>-<n>.html`, one folder per repository (the same `<repo>-<hash>` names as
 the worktree folders) and `n` counting the day's quizzes from 1. makora never deletes them. A page holds every diff of
-its range, capped per file, so a large range makes a large file: the 11 commits of makora's own history, with 40
-comments, made 4.1 MB.
+its range, capped per file, so a large range makes a large file: the 12 commits of makora's own history, with 45
+comments, made 4.2 MB.
 
 ## When the bank is wrong
 
