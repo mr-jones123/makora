@@ -10,6 +10,12 @@ Usage:
   makora -p "<prompt>"         print mode: answer one prompt and exit
   makora update                update to the latest release
   makora setup                 build the Python environment REPL cells run in
+  makora dream                 turn this project's recent sessions into memory, in the background
+  makora dream status [id]     show the newest dream, or dream <id>
+  makora dream cancel [id]     stop the newest dream, or dream <id>
+  makora wiki-setup <vault> [folder]
+                               render memory into <vault>/<folder> (default makora); a new path becomes a vault
+  makora wiki                  render memory into the vault again
 
 Options:
   --fake                       scripted fake model (also MAKORA_FAKE=1)
@@ -33,6 +39,10 @@ Exit codes: 0 success; 1 for an unanswered print-mode prompt, a locked session, 
 for invalid arguments (the message and the usage go to stderr), such as `--ephemeral --continue`.
 
 `ls` prints one line per session, newest first: id, last update, directory, title.
+
+`dream` starts a dream for the project of the current directory and exits; a detached `makora dream-worker <id>`
+process runs it, logging to `~/.makora/memory/dreams/<id>.log`. `dream`, `wiki` and `wiki-setup` take `--fake` like a
+run. See [features/memory.md](../features/memory.md).
 
 `rm <id>` lists what deleting the session removes (its worktrees, the write branches without work, its refs and its
 directory) and which branches it keeps, then deletes it only after `y` or `yes` on stdin. See

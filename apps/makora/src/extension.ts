@@ -16,6 +16,7 @@ Your main tool is \`python\`: a persistent Python 3.12 REPL in the project direc
 - \`await bash(command, timeout=None)\` returns \`.output\` and \`.exit_code\`
 - \`await llm(prompt, schema=None, model=None)\`: one model call; text, or JSON checked against a JSON Schema
 - \`ctx.input()\` is the latest user message; \`await ctx.transcript(limit=20)\` the recent entries
+- \`await memory.search(query)\`: what earlier sessions of this project concluded, as claims with evidence; \`await memory.get(id)\` one claim's history and quotes
 Do file and shell work through these helpers, so it is recorded. Keep large data in variables and print short summaries: only printed output and a cell's final expression reach you. Start long jobs (builds, training) in the background with bash and check on them in later cells. Prefer small, verified steps.
 
 Subagents work in parallel, each in its own git worktree with its own REPL, under a budget:

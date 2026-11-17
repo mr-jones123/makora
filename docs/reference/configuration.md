@@ -21,6 +21,8 @@
 | `sessions/<id>/` | makora | See [features/sessions.md](../features/sessions.md) |
 | `worktrees/<repo>-<hash>/<session>/<conversation>/` | `/fork` and write subagents, removed by `x` in the agents dashboard or `remove(name)` | Git worktrees of forks ([architecture/forks.md](../architecture/forks.md#the-worktree)) and of write subagents unless `worktrees.write` moves them ([features/subagents.md](../features/subagents.md#where-worktrees-live-and-why)) |
 | `quizzes/<repo>-<hash>/<YYYY-MM-DD>-<n>.html` | `quiz.publish`, from `/quiz` | Self-contained quiz pages, one folder per repository; makora never deletes them ([features/quiz.md](../features/quiz.md#where-pages-go)) |
+| `memory/memory.sqlite` | dreams, `memory.search` | Memory: episodes, claims with versions and evidence, dreams; see [features/memory.md](../features/memory.md) |
+| `memory/dreams/<id>.log` | a dream's worker | What the dream did, step by step |
 | `python/venv/` | makora, on the first REPL cell | The Python environment kernels run in; delete it to force a rebuild ([architecture/repl.md](../architecture/repl.md#the-python-environment)) |
 
 ### `settings.json` fields
@@ -36,6 +38,10 @@
 | `agents.setupTimeoutMinutes` | `10` | How long a repository's `worktreeSetup` may run before it is killed and its child stopped; a positive number, read at each run |
 | `agents.approvedSetups` | none | The `worktreeSetup` commands you let run, as `{ "repository": "<top level>", "sha256": "<hex SHA-256 of the command>" }`. The TUI adds one when you approve a command; a command not listed is skipped ([features/subagents.md](../features/subagents.md#the-setup-command-is-code-from-the-repository)) |
 | `pstack.models.code`, `pstack.models.judge` | `"session"` | A pstack tier: `"session"` (the spawning conversation's model), or `{ "model": "provider/modelId", "thinking": "<level>" }`. `spawn(model="code")` and `spawn(model="judge")` run the child on it; a model without credentials falls back to the session model with a notice. Read at each spawn ([features/subagents.md](../features/subagents.md#models)) |
+| `memory.vault`, `memory.folder` | none, `"makora"` | The Obsidian vault and the folder of it that `/wiki` renders into; set by `/wiki-setup` |
+| `memory.ollamaUrl` | `"http://127.0.0.1:11434"` | Where Ollama answers embedding requests |
+| `memory.embedModel` | `"embeddinggemma"` | The Ollama embedding model; another one embeds memory again |
+| `memory.dreamBudgetUsd` | `2` | What one dream may spend; a dream whose estimate is over it fails before any model call |
 | `pstack.budget` | `"large"` | `unlimited` (max), `large` (xhigh), `medium` (high) or `small` (medium): the thinking level `/pstack` gives both tiers, clamped to what each model supports |
 | `pstack.roles.<role>` | pstack's split | Where a pstack role runs, by its setup-pstack label (`"bug-fix"`, `"how explainer"`, …): `"code"`, `"judge"` or `"session"`; a panel role (`arena runners`, `arena cross-judge pool`, `architect runners`, `interrogate reviewers`) takes a list, one seat per subagent. Defaults: code roles on `code`, judgment roles on `judge`, panels `["judge", "code"]` ([features/skills.md](../features/skills.md#pstack-model-roles)) |
 

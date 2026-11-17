@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { build } from "esbuild";
 import { shippedPaths } from "./release/repo.ts";
+import { shipVec } from "./release/sqlite-vec.ts";
 
 const APP = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = join(APP, "..", "..");
@@ -125,8 +126,8 @@ function git(args) {
 	return execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
 }
 
-/** The licenses of everything in the release besides makora and pi's MIT code. */
-function notice(packages) {
+/** The licenses of everything in the release besides makora and pi's MIT code; `native` lists shipped binaries. */
+function notice(packages, native) {
 	const lock = JSON.parse(readFileSync(join(APP, "skills.lock.json"), "utf8"));
 	const lines = [
 		`makora ${version}`,
@@ -146,6 +147,7 @@ function notice(packages) {
 		);
 		lines.push(`- ${pin.repository} at ${pin.commit}: ${licenses.join(", ")}`);
 	}
+	lines.push("", "Native binaries:", ...native);
 	lines.push("", "Bundled npm packages (in makora.mjs), each with its license:");
 	const unlicensed = [];
 	const texts = [];
@@ -199,6 +201,8 @@ const bundled = [
 	]),
 ].sort();
 copyRuntimeFiles();
+// Memory's vector search loads sqlite-vec from beside the bundle; a release built on one platform serves all four.
+const vec = await shipVec(REPO, dir);
 writeFileSync(
 	join(dir, "package.json"),
 	`${JSON.stringify(
@@ -216,7 +220,7 @@ writeFileSync(
 );
 writeFileSync(join(dir, "BUILD"), `${JSON.stringify({ commit: commit(), date: new Date().toISOString() })}\n`);
 cpSync(join(REPO, "LICENSE"), join(dir, "LICENSE"));
-writeFileSync(join(dir, "NOTICE"), notice(bundled));
+writeFileSync(join(dir, "NOTICE"), notice(bundled, [vec]));
 const tarball = pack();
 console.log(`${relative(process.cwd(), dir)}/`);
 console.log(`${relative(process.cwd(), tarball)}`);

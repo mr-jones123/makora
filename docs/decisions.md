@@ -269,3 +269,18 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   merging. The 0.1.0 release and its tarball were re-created on the new repository; PRs #1 and #2 of the old one were
   lost with it. The images commit was reworded from `feat:` to `fix:` at the owner's request, so the next release is
   0.1.1.
+- **Memory is SQLite, and the wiki is generated from it (owner, 2026-11-17).** `memory.sqlite` holds raw episodes,
+  claims with versions, evidence and conflicts, and dreams; rows show what changed and can be queried, which markdown
+  and a text search tool cannot. The Obsidian wiki is rendered from the rows and never read back; the owner keeps
+  hand-written notes in another folder. Modelled on memorantado's hybrid layer, without its knowledge graph and
+  timeline, whose overlap would let one fact drift in three places. No procedural memory: standards stay in
+  `AGENTS.md`. See [apps/makora/docs/memory.md](../apps/makora/docs/memory.md).
+- **Dreams are started by hand and run as asynchronous jobs (owner, 2026-11-17).** The lifecycle copies Anthropic's
+  Dreams API (pending, running, completed, failed, canceled; changes staged and applied only on completion), run on
+  makora's own models and local sessions instead of the API, which needs sessions stored at Anthropic and Anthropic
+  models. A detached worker process runs each dream; a schedule can call the same command later.
+- **Nothing enters memory without a quote a transcript holds (2026-11-17).** The organizer's operations are model
+  output: each quote must appear in a turn the dream read, and a claim left without one is dropped and named in the
+  report. Anthropic's article found dreaming corrects notes only because transcripts are ground truth.
+- **Embeddings come from a local Ollama (owner, 2026-11-17).** `embeddinggemma`, through sqlite-vec. memorantado's
+  default hashed words into 64 slots, which is word matching, and its SQLite search scanned only the newest 5000 rows.

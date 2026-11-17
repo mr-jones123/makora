@@ -1,6 +1,7 @@
 // Slash commands: the table the editor's autocomplete lists and the TUI dispatches typed commands through.
 import { execFile } from "node:child_process";
-import { dirname } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
@@ -18,6 +19,13 @@ import type { MakoraApp } from "../app.ts";
 import { loginAccount } from "../auth/login.ts";
 import { createFork, forkPoints } from "../fork.ts";
 import { INSTALL } from "../install.ts";
+import {
+	dreamCancelCommand,
+	dreamCommand,
+	dreamStatusCommand,
+	wikiCommand,
+	wikiSetupCommand,
+} from "../memory/commands.ts";
 import { openInBrowser } from "../open.ts";
 import { tildify } from "../paths.ts";
 import {
@@ -92,6 +100,12 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 			host.info("Compaction started.");
 		},
 	},
+	dream: {
+		description: "Turn this project's recent sessions into memory in the background: [status | cancel] [id]",
+		run: dream,
+	},
+	"wiki-setup": { description: "Render memory into an Obsidian vault: <vault> [folder]", run: wikiSetup },
+	wiki: { description: "Render memory into the vault again", run: async (host) => host.info(wikiCommand(host.app)) },
 	update: { description: "Update makora to the latest release; restart to use it", run: update },
 	quit: { description: "Exit makora", run: async (host) => host.exit() },
 };
@@ -233,6 +247,33 @@ async function quiz(host: CommandHost, args: string, skills: readonly Skill[]): 
 	if (request.kind === "refused") return host.info(request.reason);
 	host.info(request.summary);
 	await host.submit(request.text);
+}
+
+/** `/dream`, `/dream status [id]`, `/dream cancel [id]`. */
+async function dream(host: CommandHost, args: string): Promise<void> {
+	const [action = "", which] = args.split(/\s+/).filter(Boolean);
+	const id = which === undefined ? undefined : Number.parseInt(which, 10);
+	if (which !== undefined && !Number.isSafeInteger(id))
+		return host.notice(`/dream ${action}: ${which} is not a dream id.`);
+	switch (action) {
+		case "":
+			return host.info(await dreamCommand(host.app, host.feed().state.cwd));
+		case "status":
+			return host.info(dreamStatusCommand(host.app, id));
+		case "cancel":
+			return host.info(dreamCancelCommand(host.app, id));
+		default:
+			return host.notice(`/dream takes nothing, status [id] or cancel [id], not ${action}.`);
+	}
+}
+
+/** `/wiki-setup <vault> [folder]`; a vault path with spaces is quoted. */
+async function wikiSetup(host: CommandHost, args: string): Promise<void> {
+	const parts = [...args.matchAll(/"([^"]+)"|(\S+)/g)].map((match) => match[1] ?? match[2]!);
+	if (parts.length < 1 || parts.length > 2)
+		return host.notice("/wiki-setup takes a vault path and an optional folder name.");
+	const vault = parts[0]!.startsWith("~/") ? join(homedir(), parts[0]!.slice(2)) : parts[0]!;
+	host.info(wikiSetupCommand(host.app, vault, parts[1]));
 }
 
 const run = promisify(execFile);

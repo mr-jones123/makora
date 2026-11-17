@@ -1,10 +1,13 @@
 // User settings in `<home>/settings.json`: the default model, thinking level, REPL snapshots, subagent worktrees and
-// limits, the worktree setup commands the user approved, and the pstack model roles. Read through getters at each use,
-// so an edit by `/model`, `/thinking`, `/pstack`, or another process applies without a restart.
+// limits, the worktree setup commands the user approved, the pstack model roles, and memory's vault, embeddings and dream
+// budget. Read through getters at each use, so an edit by `/model`, `/thinking`, `/pstack`, `/wiki-setup`, or another
+// process applies without a restart.
 import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
 import type { HarnessSettings, ModelRef } from "@earendil-works/pi-durable";
+import { DEFAULT_EMBED, type EmbedConfig } from "./memory/embed.ts";
+import { DEFAULT_WIKI_FOLDER, folderProblem } from "./memory/wiki-setup.ts";
 import { type PstackConfig, type PstackSettings, parsePstack, pstackConfig, pstackSettings } from "./pstack.ts";
 
 /** The contents of `settings.json`. */
@@ -27,6 +30,30 @@ export interface MakoraSettings {
 	};
 	/** The pstack tiers, budget and roles that differ from the defaults. */
 	readonly pstack?: PstackSettings;
+	/** Memory: the wiki's vault and folder, embeddings, and the dream budget. */
+	readonly memory?: MemorySettings;
+}
+
+/** The `memory` block of `settings.json`. */
+export interface MemorySettings {
+	/** The Obsidian vault `/wiki` renders into, set by `/wiki-setup`. */
+	readonly vault?: string;
+	/** The folder of the vault makora owns; default `makora`. */
+	readonly folder?: string;
+	/** Ollama's base URL; default `http://127.0.0.1:11434`. */
+	readonly ollamaUrl?: string;
+	/** The Ollama embedding model; default `embeddinggemma`. */
+	readonly embedModel?: string;
+	/** What one dream may spend, in US dollars; default 2. */
+	readonly dreamBudgetUsd?: number;
+}
+
+/** The memory choices in effect, defaults filled in. */
+export interface MemoryConfig {
+	readonly vault: string | undefined;
+	readonly folder: string;
+	readonly embed: EmbedConfig;
+	readonly dreamBudgetUsd: number;
 }
 
 /** A repository's worktree setup command the user approved: the repository's top level and the command's SHA-256. */
@@ -43,6 +70,8 @@ export interface SettingsFile {
 	readonly setupTimeoutMinutes: number;
 	/** The pstack choices in effect, defaults filled in. */
 	readonly pstack: PstackConfig;
+	/** The memory choices in effect, defaults filled in. */
+	readonly memory: MemoryConfig;
 	/** What parsing the file dropped, one message each; empty when nothing was. */
 	readonly warnings: readonly string[];
 	/** Whether the user approved `approval`'s command for its repository. */
@@ -53,11 +82,14 @@ export interface SettingsFile {
 	approveSetup(approval: SetupApproval): void;
 	/** Store `config` as the pstack choices: what differs from the defaults, or no `pstack` field when nothing does. */
 	setPstack(config: PstackConfig): void;
+	/** Write `change` over the memory block; `undefined` fields stay as they are. */
+	setMemory(change: MemorySettings): void;
 	/** Harness run policy, read live from this file. */
 	readonly harness: HarnessSettings;
 }
 
 const DEFAULT_MAX_RUNNING = 4;
+const DEFAULT_DREAM_BUDGET_USD = 2;
 const DEFAULT_SETUP_TIMEOUT_MINUTES = 10;
 
 /** A live view of the settings file at `file`; a missing or unreadable file reads as empty settings. */
@@ -116,6 +148,15 @@ export function openSettings(file: string): SettingsFile {
 		get pstack() {
 			return pstackConfig(current().pstack);
 		},
+		get memory() {
+			const memory = current().memory ?? {};
+			return {
+				vault: memory.vault,
+				folder: memory.folder ?? DEFAULT_WIKI_FOLDER,
+				embed: { url: memory.ollamaUrl ?? DEFAULT_EMBED.url, model: memory.embedModel ?? DEFAULT_EMBED.model },
+				dreamBudgetUsd: memory.dreamBudgetUsd ?? DEFAULT_DREAM_BUDGET_USD,
+			};
+		},
 		get warnings() {
 			return parsed().warnings;
 		},
@@ -130,6 +171,10 @@ export function openSettings(file: string): SettingsFile {
 			const { pstack: _, ...rest } = current();
 			const pstack = pstackSettings(config);
 			write(pstack === undefined ? rest : { ...rest, pstack });
+		},
+		setMemory(change) {
+			const defined = Object.entries(change).filter(([, value]) => value !== undefined);
+			update({ memory: { ...current().memory, ...Object.fromEntries(defined) } });
 		},
 		harness,
 	};
@@ -149,7 +194,10 @@ type ParsedSettings = { readonly value: MakoraSettings; readonly warnings: reado
 // `settings.json` is user-edited: the trust boundary of settings.
 function parseSettings(raw: unknown): ParsedSettings {
 	if (typeof raw !== "object" || raw === null) return { value: {}, warnings: [] };
-	const { model, thinkingLevel, titleModel, snapshots, worktrees, agents, pstack } = raw as Record<string, unknown>;
+	const { model, thinkingLevel, titleModel, snapshots, worktrees, agents, pstack, memory } = raw as Record<
+		string,
+		unknown
+	>;
 	const settings: {
 		-readonly [Key in keyof MakoraSettings]: MakoraSettings[Key];
 	} = {};
@@ -170,10 +218,25 @@ function parseSettings(raw: unknown): ParsedSettings {
 		};
 	}
 	if (typeof agents === "object" && agents !== null) settings.agents = parseAgents(agents as Record<string, unknown>);
+	if (typeof memory === "object" && memory !== null) settings.memory = parseMemory(memory as Record<string, unknown>);
 	if (pstack === undefined) return { value: settings, warnings: [] };
 	const parsedPstack = parsePstack(pstack);
 	settings.pstack = parsedPstack.settings;
 	return { value: settings, warnings: parsedPstack.warnings };
+}
+
+function parseMemory(raw: Record<string, unknown>): MemorySettings {
+	const { vault, folder, ollamaUrl, embedModel, dreamBudgetUsd } = raw;
+	const text = (value: unknown) => (typeof value === "string" && value.trim() !== "" ? value : undefined);
+	return {
+		...(text(vault) === undefined ? {} : { vault: text(vault) }),
+		...(text(folder) === undefined || folderProblem(folder as string) !== undefined
+			? {}
+			: { folder: folder as string }),
+		...(text(ollamaUrl) === undefined ? {} : { ollamaUrl: text(ollamaUrl) }),
+		...(text(embedModel) === undefined ? {} : { embedModel: text(embedModel) }),
+		...(typeof dreamBudgetUsd === "number" && dreamBudgetUsd > 0 ? { dreamBudgetUsd } : {}),
+	};
 }
 
 function parseAgents(raw: Record<string, unknown>): NonNullable<MakoraSettings["agents"]> {

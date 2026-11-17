@@ -1,5 +1,5 @@
 """The functions a cell calls into makora: Durable's coding tools, one model call, the conversation's context, its
-subagents, the session quiz, and showing the model an image."""
+subagents, the session quiz, memory, and showing the model an image."""
 
 # `Agents.list` shadows the builtin inside its class body; postponed annotations keep `list[...]` meaning the builtin.
 from __future__ import annotations
@@ -96,6 +96,25 @@ class Quiz:
 
     def __repr__(self) -> str:
         return "<makora quiz: await quiz.publish(bank)>"
+
+
+class Memory:
+    """`memory` in a cell: what earlier sessions of this project concluded, from makora's memory."""
+
+    def __init__(self, host: Host):
+        self._host = host
+
+    async def search(self, query: str, limit: int = 8, episodes: bool = False) -> dict[str, Any]:
+        """Claims (and with `episodes=True` raw turns) matching `query` by words and meaning, best first:
+        `{hits: [...], note?}`. A claim hit has `id`, `subject`, `type`, `status` and `statement`."""
+        return await self._host.call("memory", {"action": "search", "query": query, "limit": limit, "episodes": episodes})
+
+    async def get(self, id: int) -> dict[str, Any]:
+        """One claim: its statement, every earlier version, the quotes it rests on, and its disputes."""
+        return await self._host.call("memory", {"action": "get", "id": id})
+
+    def __repr__(self) -> str:
+        return "<makora memory: await memory.search(query, limit=8, episodes=False), memory.get(id)>"
 
 
 async def _agents(host: Host, action: str, args: dict[str, Any]) -> Any:
@@ -243,4 +262,5 @@ def build(host: Host) -> dict[str, Any]:
         "llm": llm,
         "ctx": Context(host),
         "quiz": Quiz(host),
+        "memory": Memory(host),
     }

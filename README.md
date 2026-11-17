@@ -36,6 +36,7 @@ Then `/login` to connect a provider. Details: [getting started](docs/getting-sta
 | Agents dashboard | Ctrl+A: every agent's state, budget, cells, messages and changes; open, diff, merge, stop, remove. [tui](docs/features/tui.md) |
 | `/fork` and `/diff` | Fork a conversation at an earlier point, with that point's variables and files; review changes by tab. [diff](docs/features/diff.md) |
 | `/quiz` | A self-scoring HTML quiz on what a session built and decided, with annotated diffs. [quiz](docs/features/quiz.md) |
+| Memory | `/dream` turns a project's sessions into claims with quoted evidence; `memory.search` from cells; `/wiki-setup` renders them into an Obsidian vault. [memory](docs/features/memory.md) |
 | Skills | pstack and no-mistakes bundled; `/pstack` picks the code and judge models. [skills](docs/features/skills.md) |
 | Accounts | Several provider logins, including Claude Pro/Max, switched with `/accounts`. [accounts](docs/features/accounts.md) |
 

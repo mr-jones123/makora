@@ -148,6 +148,8 @@ Every binding can be remapped in `~/.makora/keybindings.json` ([reference/config
 | `/new` | Start a new session in this directory |
 | `/resume` | Resume another session |
 | `/fork` | Fork the active conversation before an earlier message, with that point's variables and files; the message, with its images, goes back in the editor ([sessions.md](sessions.md#forks)) |
+| `/dream [status \| cancel] [id]` | Start a dream that turns this project's recent sessions into memory in the background, show one, or stop one ([memory.md](memory.md)) |
+| `/wiki-setup <vault> [folder]`, `/wiki` | Render memory into an Obsidian vault, a new one when the path is missing; `/wiki` renders again ([memory.md](memory.md#the-wiki)) |
 | `/quiz [rev-range \| all]` | Have the agent write a 10-question quiz on what this session's commits built and decided (or the range's, or the whole project's), saved as a self-scoring HTML page and opened in the browser ([quiz.md](quiz.md)) |
 | `/compact [instructions]` | Compact the context now |
 | `/diff` | Open the diff view of the active conversation's directory: changes, staging, commit history, ask about a line ([diff.md](diff.md)) |

@@ -230,13 +230,54 @@ const AGENT_TASK = /<agent_task[^>]*>\n([\s\S]*?)\n<\/agent_task>/;
 // A prompt with a fenced python block runs that block as its one cell: tests and demos write their own cells.
 const PYTHON_FENCE = /```python\n([\s\S]*?)\n```/;
 
+// A dream's two calls, told apart by their system prompts: the analyzer notes the first user message of the slice, and
+// the organizer makes each note a claim, so `--fake` demos a whole dream with real quotes.
+function fakeDream(messages: readonly Message[], input: string): string | undefined {
+	const system = messages.find((message) => message.role === "system");
+	const prompt = typeof system?.content === "string" ? system.content : "";
+	if (prompt.startsWith("You read one part of a coding session")) {
+		const episode = /\[E(\d+) user\]\n(.+)/.exec(input);
+		if (episode === null) return JSON.stringify({ notes: [] });
+		const line = episode[2]!.trim();
+		const note = {
+			subject: "What the user asked",
+			kind: "fact",
+			scope: "project",
+			statement: `The user asked: ${line}`,
+			evidence: [{ episode: Number(episode[1]), quote: line, polarity: "supports" }],
+		};
+		return JSON.stringify({ notes: [note] });
+	}
+	if (prompt.startsWith("You keep a project's memory")) {
+		const notes = [
+			...input.matchAll(/^note \d+ \[(\w+), (\w+)\] subject "([^"]+)": (.+)\n {2}E(\d+) supports: "(.*)"$/gm),
+		];
+		const ops = notes.map((note, index) => ({
+			op: "create",
+			ref: `n${index + 1}`,
+			subject: note[3],
+			kind: note[1],
+			scope: note[2],
+			statement: note[4],
+			evidence: [{ episode: Number(note[5]), quote: note[6], polarity: "supports" }],
+		}));
+		return JSON.stringify({
+			ops,
+			report: `The fake organizer made ${ops.length} claim(s) from ${notes.length} note(s).`,
+		});
+	}
+	return undefined;
+}
+
 function fakeResponse(messages: readonly Message[]) {
 	const isPrompt = (message: Message) => message.role === "user" && !AGENT_NOTE.test(userText(message));
 	const lastUser = messages.findLastIndex(isPrompt);
 	const input = messages[lastUser];
 	const text = input?.role === "user" ? userText(input) : "";
-	// A request without tools is a cell's `llm()` call; one with a schema asks for JSON in its system prompt.
+	// A request without tools is a cell's `llm()` call or a dream's; one with a schema asks for JSON in its system prompt.
 	if (!messages.some((message) => message.role === "system" && (message.toolsAdded?.length ?? 0) > 0)) {
+		const dreaming = fakeDream(messages, text);
+		if (dreaming !== undefined) return fauxAssistantMessage([fauxText(dreaming)]);
 		const wantsJson = messages.some(
 			(message) =>
 				message.role === "system" && typeof message.content === "string" && message.content.includes("JSON Schema"),

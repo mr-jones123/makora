@@ -20,6 +20,19 @@ export type CliCommand =
 	| { readonly kind: "setup" }
 	/** Install the latest release over this one. */
 	| { readonly kind: "update" }
+	/** Start a dream for this directory's project, show one, or cancel one. */
+	| {
+			readonly kind: "dream";
+			readonly action: "start" | "status" | "cancel";
+			readonly id?: number;
+			readonly fake: boolean;
+	  }
+	/** The detached process that runs dream `id`; `makora dream` starts it. */
+	| { readonly kind: "dreamWorker"; readonly id: number; readonly fake: boolean }
+	/** Render memory into the wiki folder of the vault. */
+	| { readonly kind: "wiki" }
+	/** Point makora at an Obsidian vault and make its wiki folder. */
+	| { readonly kind: "wikiSetup"; readonly vault: string; readonly folder?: string }
 	| {
 			readonly kind: "run";
 			readonly session: SessionChoice;
@@ -42,6 +55,12 @@ export const USAGE = `Usage:
   makora -p "<prompt>"         print mode: answer one prompt and exit
   makora update                update to the latest release
   makora setup                 build the Python environment REPL cells run in
+  makora dream                 turn this project's recent sessions into memory, in the background
+  makora dream status [id]     show the newest dream, or dream <id>
+  makora dream cancel [id]     stop the newest dream, or dream <id>
+  makora wiki-setup <vault> [folder]
+                               render memory into <vault>/<folder> (default makora); a new path becomes a vault
+  makora wiki                  render memory into the vault again
 
 Options:
   --fake                       scripted fake model (also MAKORA_FAKE=1)
@@ -52,6 +71,8 @@ Options:
 
 /** Parse makora's arguments (without `node` and the script); `fakeEnv` is the value of `MAKORA_FAKE`. */
 export function parseCli(argv: readonly string[], fakeEnv: string | undefined): CliCommand {
+	const memory = parseMemoryCommand(argv, fakeEnv === "1");
+	if (memory !== undefined) return memory;
 	let session: SessionChoice = { kind: "new" };
 	let prompt: string | undefined;
 	let fake = fakeEnv === "1";
@@ -126,4 +147,42 @@ export function parseCli(argv: readonly string[], fakeEnv: string | undefined): 
 		...(prompt === undefined ? {} : { prompt }),
 		...(model === undefined ? {} : { model }),
 	};
+}
+
+const MEMORY_COMMANDS = new Set(["dream", "dream-worker", "wiki", "wiki-setup"]);
+
+// Memory's subcommands take positional arguments and only `--fake`, so they are parsed apart from a run's options.
+function parseMemoryCommand(argv: readonly string[], fakeEnv: boolean): CliCommand | undefined {
+	const [name, ...rest] = argv;
+	if (name === undefined || !MEMORY_COMMANDS.has(name)) return undefined;
+	const fake = fakeEnv || rest.includes("--fake");
+	const args = rest.filter((arg) => arg !== "--fake");
+	const id = (text: string | undefined): number | undefined | "bad" =>
+		text === undefined ? undefined : /^\d+$/.test(text) ? Number(text) : "bad";
+	switch (name) {
+		case "dream": {
+			const [action = "start", which, ...extra] = args;
+			if (action !== "start" && action !== "status" && action !== "cancel")
+				return {
+					kind: "error",
+					message: `\`dream ${action}\`: use \`dream\`, \`dream status [id]\` or \`dream cancel [id]\``,
+				};
+			const parsed = id(which);
+			if (parsed === "bad" || extra.length > 0 || (action === "start" && which !== undefined))
+				return { kind: "error", message: `\`dream ${action}\` takes at most one dream id` };
+			return { kind: "dream", action, fake, ...(parsed === undefined ? {} : { id: parsed }) };
+		}
+		case "dream-worker": {
+			const parsed = id(args[0]);
+			return typeof parsed === "number" && args.length === 1
+				? { kind: "dreamWorker", id: parsed, fake }
+				: { kind: "error", message: "`dream-worker` takes one dream id" };
+		}
+		case "wiki":
+			return args.length === 0 ? { kind: "wiki" } : { kind: "error", message: "`wiki` takes no arguments" };
+		default:
+			return args.length === 1 || args.length === 2
+				? { kind: "wikiSetup", vault: args[0]!, ...(args[1] === undefined ? {} : { folder: args[1] }) }
+				: { kind: "error", message: "`wiki-setup` takes a vault path and an optional folder name" };
+	}
 }

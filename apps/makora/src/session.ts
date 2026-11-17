@@ -26,6 +26,7 @@ import { agentRoots, defaultModel, type MakoraApp, worktreeRoots } from "./app.t
 import { makoraExtension } from "./extension.ts";
 import { GitWrites } from "./git/writes.ts";
 import { KernelManager } from "./kernel/manager.ts";
+import { createMemoryTool } from "./memory/tool.ts";
 import { openInBrowser } from "./open.ts";
 import { createQuizTool } from "./quiz/publish.ts";
 import { createRepl, type Repl } from "./repl/extension.ts";
@@ -182,6 +183,12 @@ async function open(
 			inform: (message) => announce("info", message),
 		});
 		registry.install(defineExtension({ name: "makora-quiz", tools: [quiz] }));
+		const memory = createMemoryTool({
+			home: app.paths.home,
+			defaultCwd: meta.cwd,
+			embed: () => app.settings.memory.embed,
+		});
+		registry.install(defineExtension({ name: "makora-memory", tools: [memory] }));
 		const storage: Storage =
 			store.kind === "persistent"
 				? await openNodeSqliteStorage(sessionDatabase(store.sessionsDir, meta.id))

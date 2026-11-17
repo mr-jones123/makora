@@ -304,6 +304,11 @@ async function answerHost(
 				(await nestedTool("quiz_publish", request.params as JsonObject, request.requestId, calls, api, context))
 					.structuredOutput ?? ""
 			);
+		case "memory":
+			return (
+				(await nestedTool("memory", request.params as JsonObject, request.requestId, calls, api, context))
+					.structuredOutput ?? ""
+			);
 		case "show":
 			// `data` is the kernel's base64, decoded and sniffed before Photon reads it.
 			return output.show(request.params.data, imageModel((await api.agent(context)).model, api.models), images);

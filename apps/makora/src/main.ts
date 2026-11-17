@@ -9,6 +9,14 @@ import { openApp } from "./app.ts";
 import { parseCli, type SessionChoice, USAGE } from "./cli-args.ts";
 import { describeBuild, INSTALL } from "./install.ts";
 import { ensurePythonEnv } from "./kernel/python-env.ts";
+import {
+	dreamCancelCommand,
+	dreamCommand,
+	dreamStatusCommand,
+	dreamWorkerCommand,
+	wikiCommand,
+	wikiSetupCommand,
+} from "./memory/commands.ts";
 import { homePaths, makoraHome, tildify } from "./paths.ts";
 import { runPrint } from "./print.ts";
 import { type MakoraSession, openEphemeralSession, openSession } from "./session.ts";
@@ -52,6 +60,19 @@ async function main(): Promise<number> {
 			return setupCommand();
 		case "update":
 			return updateCommand();
+		case "dream":
+			return memoryCommand(async (app) => {
+				if (command.action === "start") return dreamCommand(app, process.cwd());
+				return command.action === "status"
+					? dreamStatusCommand(app, command.id)
+					: dreamCancelCommand(app, command.id);
+			}, command.fake);
+		case "dreamWorker":
+			return dreamWorkerCommand(openApp(makoraHome(), command.fake), command.id);
+		case "wiki":
+			return memoryCommand(async (app) => wikiCommand(app), false);
+		case "wikiSetup":
+			return memoryCommand(async (app) => wikiSetupCommand(app, command.vault, command.folder), false);
 		case "run":
 			break;
 	}
@@ -120,6 +141,20 @@ function listCommand(): number {
 		process.stdout.write(`${meta.id}  ${updated}  ${tildify(meta.cwd)}  ${meta.title ?? "(untitled)"}\n`);
 	}
 	return 0;
+}
+
+/** Run one of memory's commands and print what it says; exit 1 only when it throws. */
+async function memoryCommand(
+	run: (app: ReturnType<typeof openApp>) => Promise<string>,
+	fake: boolean,
+): Promise<number> {
+	try {
+		process.stdout.write(`${await run(openApp(makoraHome(), fake))}\n`);
+		return 0;
+	} catch (error) {
+		process.stderr.write(`makora: ${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
 }
 
 /** `makora setup`: build the Python environment now, as install.sh does, so the first REPL cell does not wait. */
