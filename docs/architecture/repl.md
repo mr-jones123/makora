@@ -58,11 +58,14 @@ needs it:
 3. If both fail, the cell fails with `makora could not build its Python environment. Install uv
    (https://docs.astral.sh/uv/), or python3 3.11 or newer with venv and pip.` followed by both errors.
 
-The marker file `makora-env.json` in the venv records the dill version. A venv whose marker names another version is
-rebuilt. Each build runs in its own temporary directory and is renamed into place, so two makora processes that build
-at once both succeed and end up on one venv.
+The marker file `makora-env.json` in the venv records what it was built from: the Python version uv asks for and the
+dill version. A venv whose marker differs is rebuilt, so a makora release that changes either replaces the shared venv
+on its first use, and one that changes neither keeps it. Each build runs in its own temporary directory and is renamed
+into place, so two makora processes that build at once both succeed and end up on one venv. `makora setup`, which
+`install.sh` runs, builds it ahead of the first cell.
 
-`makora_rlm` is not installed into the venv. Kernels run with `PYTHONPATH` set to `apps/makora/python`.
+`makora_rlm` is not installed into the venv. Kernels run with `PYTHONPATH` set to the `python/` directory of the
+running makora (`src/install.ts`): `apps/makora/python` from source, the release's own copy when installed.
 
 ## The kernel
 
@@ -330,8 +333,8 @@ from the dill pin.
 The phase 2 design written before the build differed in these points:
 
 - Blobs are not zstd-compressed. Python 3.12 has no zstd in its standard library.
-- The environment is `<home>/python/venv`, pinned by the dill version in a marker file. There is no lock file and no
-  `venvLock` field in `details.kernel`.
+- The environment is `<home>/python/venv`, pinned by its Python and dill versions in a marker file. There is no lock
+  file and no `venvLock` field in `details.kernel`.
 - `details` adds `calls` and `moreCalls`.
 - `sys.exit()` ends the cell only. The design said it killed the kernel.
 - A kernel killed by a signal is reported as `SIGKILL, exit 137`, not as `exit 137` alone.

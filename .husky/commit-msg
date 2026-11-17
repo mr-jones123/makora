@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Commit messages follow `type(scope)!: subject`; the commit-messages workflow checks the same on main and in PRs.
+node apps/makora/scripts/commit-lint.mjs --message-file "$1"

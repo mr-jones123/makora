@@ -1,0 +1,223 @@
+name: makora-release
+
+# Each push to main either publishes the release a merged release PR asks for, or opens (or refreshes) the release PR
+# for the next version: one PR from release/makora that sets apps/makora/package.json's version and prepends the
+# changelog section, as apps/makora/scripts/release-plan.mjs plans them from the conventional commits since the last
+# makora-v* tag.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# One run at a time, never cancelled: a second push waits until the first has tagged and published.
+concurrency:
+  group: makora-release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      next: ${{ steps.plan.outputs.next }}
+      pending: ${{ steps.plan.outputs.pending }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Plan
+        id: plan
+        run: |
+          node apps/makora/scripts/release-plan.mjs > plan.json
+          node apps/makora/scripts/release-plan.mjs --pending > pending.json
+          jq '{current, next, bump, commits: [.commits[] | "\(.sha[0:9]) \(.type // "-") \(.subject)"]}' plan.json
+          echo "next=$(jq -r '.next // empty' plan.json)" >> "$GITHUB_OUTPUT"
+          echo "pending=$(jq -r '.version // empty' pending.json)" >> "$GITHUB_OUTPUT"
+
+  # A merged release PR: test and build the version, then tag and publish it.
+  build:
+    needs: plan
+    if: needs.plan.outputs.pending != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.plan.outputs.pending }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Hydrate model data
+        run: npm run hydrate:model-data
+
+      - name: Check
+        working-directory: apps/makora
+        run: npm run check
+
+      - name: Test
+        working-directory: apps/makora
+        run: npm test
+
+      - name: Build the release
+        working-directory: apps/makora
+        run: npm run build:release -- --version "$VERSION"
+
+      - name: Smoke-run the release
+        working-directory: apps/makora/dist/release
+        run: |
+          printed=$("makora-$VERSION/bin/makora" --version)
+          echo "$printed"
+          case $printed in
+            "makora $VERSION ($GITHUB_SHA)") ;;
+            *) echo "::error::expected makora $VERSION ($GITHUB_SHA)"; exit 1 ;;
+          esac
+
+      - name: Release notes
+        run: node apps/makora/scripts/release-plan.mjs --pending | jq -r .notes > apps/makora/dist/release/notes.md
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: makora-release
+          path: |
+            apps/makora/dist/release/makora-${{ env.VERSION }}.tar.gz
+            apps/makora/dist/release/makora-${{ env.VERSION }}.tar.gz.sha256
+            apps/makora/dist/release/notes.md
+          if-no-files-found: error
+
+  # Rerun-safe: an existing tag must point at this commit and is kept; an existing release gets its files and notes
+  # replaced instead of a second release.
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.pending }}
+      TAG: makora-v${{ needs.plan.outputs.pending }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: makora-release
+
+      - name: Tag
+        run: |
+          tagged=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq ".[] | select(.ref == \"refs/tags/$TAG\") | .object.sha")
+          if [ -z "$tagged" ]; then
+            gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
+            echo "Tagged $TAG at $GITHUB_SHA."
+          elif [ "$tagged" = "$GITHUB_SHA" ]; then
+            echo "$TAG already points at $GITHUB_SHA."
+          else
+            echo "::error::$TAG already points at $tagged, not $GITHUB_SHA."
+            exit 1
+          fi
+
+      - name: Publish the GitHub release
+        run: |
+          files="makora-$VERSION.tar.gz makora-$VERSION.tar.gz.sha256"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # shellcheck disable=SC2086
+            gh release upload "$TAG" $files --clobber
+            gh release edit "$TAG" --title "makora $VERSION" --notes-file notes.md
+          else
+            # shellcheck disable=SC2086
+            gh release create "$TAG" $files --verify-tag --title "makora $VERSION" --notes-file notes.md
+          fi
+
+  # Unreleased changes: force-update release/makora to main plus one release commit, and open or update its PR.
+  # A PR opened with GITHUB_TOKEN does not trigger workflows, so CI would not run on it: the push and the PR use
+  # MAKORA_BOT_TOKEN (a PAT or GitHub App token with contents and pull-requests write) when it is set. The fallback
+  # GITHUB_TOKEN needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+  release-pr:
+    needs: plan
+    if: needs.plan.outputs.pending == '' && needs.plan.outputs.next != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      BRANCH: release/makora
+      VERSION: ${{ needs.plan.outputs.next }}
+      GH_TOKEN: ${{ secrets.MAKORA_BOT_TOKEN || github.token }}
+    steps:
+      - name: Note the token
+        env:
+          MAKORA_BOT_TOKEN: ${{ secrets.MAKORA_BOT_TOKEN }}
+        run: |
+          if [ -z "$MAKORA_BOT_TOKEN" ]; then
+            echo "::warning::MAKORA_BOT_TOKEN is not set; the release PR is pushed with GITHUB_TOKEN, so CI does not run on it. Close and reopen the PR, or push to it, to run CI."
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MAKORA_BOT_TOKEN || github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Write the release commit
+        run: |
+          written=$(node apps/makora/scripts/release-plan.mjs --write)
+          if [ "$written" != "$VERSION" ]; then
+            echo "::error::planned $VERSION, wrote $written"
+            exit 1
+          fi
+          node apps/makora/scripts/release-plan.mjs --pending | jq -r .notes > "$RUNNER_TEMP/notes.md"
+          git config user.name "makora-bot"
+          git config user.email "makora-bot@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add -- apps/makora/package.json apps/makora/CHANGELOG.md package-lock.json
+          git commit -m "chore(release): makora $VERSION"
+          git push --force origin "$BRANCH"
+
+      - name: Open or update the release PR
+        run: |
+          title="chore(release): makora $VERSION"
+          {
+            echo "Merging this releases makora $VERSION: the makora-release workflow tests and builds it, tags \`makora-v$VERSION\` and publishes the GitHub release. This PR is regenerated on every push to main."
+            echo
+            cat "$RUNNER_TEMP/notes.md"
+          } > "$RUNNER_TEMP/body.md"
+          number=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --head "$BRANCH" --base main --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi

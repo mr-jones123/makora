@@ -2,10 +2,10 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { INSTALL } from "../install.ts";
 
-/** The dill version kernels pickle with; a venv built with another version is rebuilt. */
+/** The dill version kernels pickle with. */
 export const DILL_VERSION = "0.4.1";
 
 /** The Python `uv` builds the environment with; the `python3 -m venv` fallback takes `python3` if it is 3.11 or newer. */
@@ -18,23 +18,24 @@ export interface PythonEnv {
 	readonly dill: string;
 }
 
-/** `makora_rlm` lives in the app's `python/` directory and is put on `PYTHONPATH`, never installed. */
-export const PACKAGE_PATH = fileURLToPath(new URL("../../python", import.meta.url));
+// What a venv is built from. Its marker records this, and a venv built from anything else is rebuilt, so a makora
+// release whose Python requirements changed replaces the shared venv while one with the same ones keeps it.
+const REQUIREMENTS = `${JSON.stringify({ python: PYTHON_VERSION, dill: DILL_VERSION })}\n`;
 
 /**
- * The environment under `home`, built when missing or pinned to another dill. Safe when several makora processes
- * race: each builds in its own directory and renames it into place, and a loser uses the winner's.
+ * The environment under `home`, built when missing or built from other requirements. Safe when several makora
+ * processes race: each builds in its own directory and renames it into place, and a loser uses the winner's.
  */
 export async function ensurePythonEnv(home: string): Promise<PythonEnv> {
 	const root = join(home, "python");
 	const venv = join(root, "venv");
-	if (pinnedDill(venv) === DILL_VERSION) return envAt(venv);
+	if (current(venv)) return envAt(venv);
 	mkdirSync(root, { recursive: true });
 	const building = join(root, `venv.${process.pid}.${Date.now()}.tmp`);
 	try {
 		await buildVenv(building);
-		writeFileSync(join(building, MARKER), `${JSON.stringify({ dill: DILL_VERSION })}\n`);
-		if (existsSync(venv) && pinnedDill(venv) !== DILL_VERSION) {
+		writeFileSync(join(building, MARKER), REQUIREMENTS);
+		if (existsSync(venv) && !current(venv)) {
 			const stale = join(root, `venv.${process.pid}.${Date.now()}.stale`);
 			renameSync(venv, stale);
 			rmSync(stale, { recursive: true, force: true });
@@ -43,7 +44,7 @@ export async function ensurePythonEnv(home: string): Promise<PythonEnv> {
 			renameSync(building, venv);
 		} catch (error) {
 			// Another process renamed its build into place first.
-			if (pinnedDill(venv) !== DILL_VERSION) throw error;
+			if (!current(venv)) throw error;
 		}
 	} finally {
 		rmSync(building, { recursive: true, force: true });
@@ -56,16 +57,15 @@ const MARKER = "makora-env.json";
 const run = promisify(execFile);
 
 function envAt(venv: string): PythonEnv {
-	return { python: join(venv, "bin", "python"), packagePath: PACKAGE_PATH, dill: DILL_VERSION };
+	return { python: join(venv, "bin", "python"), packagePath: INSTALL.python, dill: DILL_VERSION };
 }
 
-// The marker is written by `ensurePythonEnv` itself; a missing or unreadable one means the venv needs building.
-function pinnedDill(venv: string): string | undefined {
+// The marker is written by `ensurePythonEnv` itself; a missing one means the venv needs building.
+function current(venv: string): boolean {
 	try {
-		const marker = JSON.parse(readFileSync(join(venv, MARKER), "utf8")) as { dill?: unknown };
-		return typeof marker.dill === "string" ? marker.dill : undefined;
+		return readFileSync(join(venv, MARKER), "utf8") === REQUIREMENTS;
 	} catch {
-		return undefined;
+		return false;
 	}
 }
 

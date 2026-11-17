@@ -2,7 +2,35 @@
 
 ## Install the command
 
-Makora runs from this repository's sources; nothing is built or published yet.
+```sh
+curl -fsSL https://raw.githubusercontent.com/mr-jones123/pi/main/apps/makora/install.sh | sh
+```
+
+The installer takes the newest GitHub release of `mr-jones123/pi` tagged `makora-v*`, checks its sha256, unpacks it to
+`~/.makora/app/<version>` and links `~/.local/bin/makora`. If `~/.local/bin` is not on your `PATH`, it prints the line
+to add to your shell profile. It also builds the Python environment the REPL runs in, so the first session does not
+wait for it.
+
+It needs Node 22.19 or newer, and [uv](https://docs.astral.sh/uv/) or Python 3.11 or newer. When one is missing it
+prints the command that installs it and stops; it never installs them itself and never uses `sudo`.
+
+| Command | What it does |
+| --- | --- |
+| `makora update` (or `/update` in the TUI) | Installs the newest release and prints `0.1.0 → 0.2.0`, or that makora is up to date |
+| `... \| sh -s -- --version 0.2.0` | Installs that release |
+| `... \| sh -s -- --uninstall` | Removes `~/.makora/app` and the link; sessions, settings and the Python environment in `~/.makora` stay |
+| `makora --version` | The installed version and the commit it was built from |
+
+`MAKORA_INSTALL_DIR` (default `~/.makora/app`), `MAKORA_BIN_DIR` (default `~/.local/bin`) and `MAKORA_REPO` (default
+`mr-jones123/pi`) change where the installer puts makora and which repository it installs from. An update keeps the
+version it replaced, so sessions still running on it keep working until they restart.
+
+A release is one bundle of makora with this repository's `packages/*`, so it runs exactly the fork's code
+([decisions.md](decisions.md)). It has no npm dependencies.
+
+### From source
+
+To run your own checkout instead, for example while working on makora:
 
 ```sh
 cd ~/Programming/Self-Projects/makora
@@ -11,8 +39,8 @@ npm run hydrate:model-data        # once: the model catalog pi-ai reads
 ln -s "$PWD/apps/makora/bin/makora.mjs" ~/.local/bin/makora
 ```
 
-`~/.local/bin` must be on your `PATH`. The link points at the repository, so code changes apply on the next run
-without reinstalling. Requires Node 22.19 or newer.
+The link points at the repository, so code changes apply on the next run without reinstalling. `makora --version`
+prints the package version with `+dev`, and `makora update` refuses: pull the checkout instead.
 
 ## First run
 

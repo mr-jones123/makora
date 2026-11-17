@@ -2,8 +2,8 @@
 // file with the annotated lines kept, their notes placed and numbered in page order, and the rows "notes only" shows)
 // and the self-contained HTML file made from the app's template with that data embedded.
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import type { DiffFile, FileStatus } from "../git/diff.ts";
+import { INSTALL } from "../install.ts";
 import type { Cite, CitedQuestion, Decision, Note, QuizContent, SummarizedCommit } from "./bank.ts";
 import { type DiffRow, diffRows, findLine } from "./diff-rows.ts";
 
@@ -183,12 +183,11 @@ function focusRanges(notes: readonly { readonly row: number }[], rows: number): 
 	return ranges;
 }
 
-const TEMPLATE = fileURLToPath(new URL("../../assets/quiz/template.html", import.meta.url));
 const DATA_SLOT = "__MAKORA_QUIZ_DATA__";
 
 /** The self-contained HTML of `page`: the app's template with the page's data in its JSON script. */
 export function renderPage(page: QuizPage): string {
-	const template = readFileSync(TEMPLATE, "utf8");
+	const template = readFileSync(INSTALL.quizTemplate, "utf8");
 	// A function replacement: `$&` or `$1` in the data must stay literal.
 	return template.replace(DATA_SLOT, () => scriptJson(page));
 }

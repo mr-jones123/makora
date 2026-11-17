@@ -11,7 +11,8 @@
 		"check": "node ../../scripts/biome-check.mjs && tsc --noEmit",
 		"format": "node ../../scripts/biome-check.mjs --write",
 		"test": "node --import ./src/source.ts --test --test-concurrency=1 test/**/*.test.ts",
-		"skills": "node scripts/sync-skills.mjs"
+		"skills": "node scripts/sync-skills.mjs",
+		"build:release": "node scripts/build-release.mjs"
 	},
 	"engines": {
 		"node": ">=22.19.0"

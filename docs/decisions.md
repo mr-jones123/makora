@@ -213,3 +213,30 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   `quiz.publish` (10 questions of 4 options, cited shas in the range, a summary per commit), so the model cannot invent
   a commit or place the right answer. Pages live in `MAKORA_HOME/quizzes/<repo>-<hash>/`, next to makora's other
   per-repository state, not in the repository, which they would dirty. See [features/quiz.md](features/quiz.md).
+- **Releases bundle the fork's packages and have no npm dependencies (owner, 2026-11-17).** Users must run exactly
+  the fork's code. The npm packages `@earendil-works/*@1.5.2` are upstream builds without the fork's `packages/*`
+  changes, for example `5f5cc0428` (Anthropic OAuth keeps the account and the organization), so a release that installed
+  them would silently run other code than this repository. A release is one esbuild bundle of `src/main.ts` with
+  `packages/*/src` resolved through the root `tsconfig.json` paths, plus the files makora reads at runtime, published as a
+  GitHub release tagged `makora-v<version>` and installed by `apps/makora/install.sh` (`curl … | sh`, or
+  `makora update`). Rejected: publishing makora to npm on top of the upstream packages, and publishing the fork's
+  packages to npm under another scope, which would add a release process per package for no user benefit. The
+  `upstream` remote stays, only for merging pi's changes into the fork. The tarball fits every platform: the only
+  native code is pi-tui's optional helpers, shipped for macOS and Linux. pi-ai loads OAuth flows and bedrock through
+  variable import specifiers next to its own files, so `main.ts` registers pi-ai's literal-import loaders
+  (`lazy-oauth`, `lazy-bedrock-provider`), which keeps them inside the bundle. The kernels' shared venv is keyed by its
+  requirements (Python version and dill), not by the release: an upgrade that changes them rebuilds it, and one that
+  does not keeps it, so the previous version, which install.sh keeps for sessions still running on it, shares it
+  without a rebuild each time the two alternate.
+- **makora's version comes from conventional commits through a release PR (owner, 2026-11-17).** Commit messages
+  follow `type(scope)!: subject`, checked in CI on the first-parent line only, so merging upstream pi never fails on
+  its history. Only commits that change what ships count: those under `apps/makora/` or a workspace package makora
+  depends on, transitively, through `package.json`, which is also the list the release build checks its bundle against,
+  so there is one source of truth. `fix` and `revert` bump patch, `feat` minor, a breaking change major (minor below
+  1.0), the other types nothing, and the changelog lists only breaking changes, features, fixes and reverts: docs, CI
+  and refactors are not news to someone installing makora. The first release is 0.1.0, and its changelog starts at the
+  fork point from upstream pi, because everything before it shipped as pi's own releases. A push to `main` does not
+  release on its own: it refreshes one release PR that carries the version and the changelog section, and merging
+  that PR tags `makora-vX.Y.Z` and publishes the GitHub release after the check, the tests and a smoke run of the
+  build. The PR is where the owner sees what the next release says and decides when it ships; releasing every push
+  would publish each fix separately, with nobody reading the notes first.

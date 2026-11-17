@@ -5,7 +5,18 @@ are built: the app skeleton, and a persistent Python REPL as the model's one too
 [the docs](../../docs/README.md): [vision](../../docs/vision.md), [roadmap](../../docs/roadmap.md) and
 [decisions](../../docs/decisions.md).
 
-## Run
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mr-jones123/pi/main/apps/makora/install.sh | sh
+```
+
+Installs the newest `makora-v*` GitHub release: one bundle of makora with this repository's `packages/*`, no npm
+dependencies. `makora update` updates it. Needs Node 22.19+ and uv or Python 3.11+. Releases are built with
+`npm run build:release`. See [getting started](../../docs/getting-started.md) and
+[development](../../docs/development.md#releases).
+
+## Run from source
 
 Requires Node 22.19+, the monorepo's installed dependencies and model data, and for the REPL either
 [uv](https://docs.astral.sh/uv/) or `python3` 3.11+ with `venv` and `pip`. From the repository root:

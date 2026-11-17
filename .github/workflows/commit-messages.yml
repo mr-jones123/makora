@@ -1,0 +1,35 @@
+name: commit-messages
+
+# Every commit on main and in a PR follows `type(scope)!: subject` (apps/makora/scripts/commit-lint.mjs). Only the
+# first-parent line is checked: merge commits and the commits they bring in, such as upstream pi's history, are not.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          # A PR's own head, not the merge commit GitHub makes for it.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Check commit messages
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node apps/makora/scripts/commit-lint.mjs "$BASE" "$HEAD"

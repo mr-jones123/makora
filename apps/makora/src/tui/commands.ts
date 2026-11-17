@@ -1,5 +1,7 @@
 // Slash commands: the table the editor's autocomplete lists and the TUI dispatches typed commands through.
+import { execFile } from "node:child_process";
 import { dirname } from "node:path";
+import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
 	type Api,
@@ -14,6 +16,7 @@ import type { SelectItem, SlashCommand } from "@earendil-works/pi-tui";
 import type { MakoraApp } from "../app.ts";
 import { loginAccount } from "../auth/login.ts";
 import { createFork, forkPoints } from "../fork.ts";
+import { INSTALL } from "../install.ts";
 import { openInBrowser } from "../open.ts";
 import { tildify } from "../paths.ts";
 import {
@@ -29,6 +32,7 @@ import {
 import { quizRequest } from "../quiz/request.ts";
 import { listSessions, type SessionMeta } from "../sessions.ts";
 import { type Skill, skillMessage } from "../skills.ts";
+import { updatePlan } from "../update.ts";
 import type { Dialogs } from "./dialogs.ts";
 import { PICKER_HEIGHT_PERCENT, PICKER_MIN_WIDTH, PstackPicker } from "./pstack-picker.ts";
 import type { SessionFeed } from "./session-feed.ts";
@@ -87,6 +91,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 			host.info("Compaction started.");
 		},
 	},
+	update: { description: "Update makora to the latest release; restart to use it", run: update },
 	quit: { description: "Exit makora", run: async (host) => host.exit() },
 };
 
@@ -227,6 +232,22 @@ async function quiz(host: CommandHost, args: string, skills: readonly Skill[]): 
 	if (request.kind === "refused") return host.info(request.reason);
 	host.info(request.summary);
 	await host.submit(request.text);
+}
+
+const run = promisify(execFile);
+
+/** Run the release's installer and show what it reported: the version change, or that makora is up to date. */
+async function update(host: CommandHost): Promise<void> {
+	const plan = updatePlan(INSTALL);
+	if (plan.kind === "refused") return host.notice(plan.reason);
+	host.info("Updating makora…");
+	try {
+		const { stdout } = await run("sh", plan.args, { env: plan.env });
+		host.info(stdout.trim());
+	} catch (error) {
+		const stderr = error instanceof Error && "stderr" in error ? String(error.stderr).trim() : "";
+		host.notice(`Update failed: ${stderr || (error instanceof Error ? error.message : String(error))}`);
+	}
 }
 
 async function accounts(host: CommandHost): Promise<void> {

@@ -1,8 +1,8 @@
 // Skills: directories holding a SKILL.md, found in makora's bundled set, the user's and the project's skill folders.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
+import { INSTALL } from "./install.ts";
 import { projectDirs } from "./project.ts";
 
 /** One discovered skill. */
@@ -24,16 +24,14 @@ export interface SkillRoots {
 	readonly makoraHome: string;
 	/** The user's home directory, holding `.agents/skills`. */
 	readonly userHome: string;
-	/** Makora's bundled skills; default `apps/makora/skills`. */
+	/** Makora's bundled skills; default the install's `skills/`. */
 	readonly bundled?: string;
 }
-
-const BUNDLED_SKILLS = fileURLToPath(new URL("../skills/", import.meta.url));
 
 /** The skill directories of `roots` in precedence order: an earlier directory's skill wins a name. */
 export function skillDirs(roots: SkillRoots): string[] {
 	return [
-		roots.bundled ?? BUNDLED_SKILLS,
+		roots.bundled ?? INSTALL.skills,
 		join(roots.makoraHome, "skills"),
 		join(roots.cwd, ".makora", "skills"),
 		join(roots.userHome, ".agents", "skills"),

@@ -120,6 +120,7 @@ Every binding can be remapped in `~/.makora/keybindings.json` ([reference/config
 | `/compact [instructions]` | Compact the context now |
 | `/diff` | Open the diff view of the active conversation's directory: changes, staging, commit history, ask about a line ([diff.md](diff.md)) |
 | `/skill:<name> [args]` | Run a skill: its instructions plus your arguments become the message |
+| `/update` | Install the newest release and show the installer's report; the session keeps its version until makora restarts. A source checkout says to `git pull` instead ([reference/cli.md](../reference/cli.md)) |
 | `/quit` | Exit |
 
 `/model`, `/thinking` and `/compact` act on the active conversation. The model and thinking choices are also saved in

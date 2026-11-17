@@ -12,9 +12,14 @@ export type SessionChoice =
 /** What the command line asks for. */
 export type CliCommand =
 	| { readonly kind: "help" }
+	| { readonly kind: "version" }
 	| { readonly kind: "list" }
 	/** Delete a stored session with its worktrees. */
 	| { readonly kind: "remove"; readonly id: string }
+	/** Build the Python environment kernels run in, so the first session does not wait for it. */
+	| { readonly kind: "setup" }
+	/** Install the latest release over this one. */
+	| { readonly kind: "update" }
 	| {
 			readonly kind: "run";
 			readonly session: SessionChoice;
@@ -35,11 +40,14 @@ export const USAGE = `Usage:
   makora ls                    list sessions
   makora rm <id>               delete a session, its worktrees, and its branches without work
   makora -p "<prompt>"         print mode: answer one prompt and exit
+  makora update                update to the latest release
+  makora setup                 build the Python environment REPL cells run in
 
 Options:
   --fake                       scripted fake model (also MAKORA_FAKE=1)
   --ephemeral                  keep the session in memory only
   --model <provider/id>        model for this session
+  -v, --version                show the version
   -h, --help                   show this help`;
 
 /** Parse makora's arguments (without `node` and the script); `fakeEnv` is the value of `MAKORA_FAKE`. */
@@ -55,10 +63,15 @@ export function parseCli(argv: readonly string[], fakeEnv: string | undefined): 
 			case "-h":
 			case "--help":
 				return { kind: "help" };
+			case "-v":
+			case "--version":
+				return { kind: "version" };
 			case "ls":
+			case "setup":
+			case "update":
 				return index === 0 && argv.length === 1
-					? { kind: "list" }
-					: { kind: "error", message: "`ls` takes no options" };
+					? { kind: arg === "ls" ? "list" : arg }
+					: { kind: "error", message: `\`${arg}\` takes no options` };
 			case "rm":
 				return index === 0 && argv.length === 2 && !argv[1]!.startsWith("-")
 					? { kind: "remove", id: argv[1]! }

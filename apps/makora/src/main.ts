@@ -1,9 +1,14 @@
 // The makora command: parses the arguments and runs the session list, deleting a session, print mode, or the TUI.
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { registerLazyBedrockProvider } from "@earendil-works/pi-ai/lazy-bedrock-provider";
+import { registerLazyOAuthFlows } from "@earendil-works/pi-ai/lazy-oauth";
 import { openApp } from "./app.ts";
 import { parseCli, type SessionChoice, USAGE } from "./cli-args.ts";
+import { describeBuild, INSTALL } from "./install.ts";
+import { ensurePythonEnv } from "./kernel/python-env.ts";
 import { homePaths, makoraHome, tildify } from "./paths.ts";
 import { runPrint } from "./print.ts";
 import { type MakoraSession, openEphemeralSession, openSession } from "./session.ts";
@@ -18,6 +23,12 @@ import {
 	sessionDir,
 } from "./sessions.ts";
 import { runTui } from "./tui/run.ts";
+import { updatePlan } from "./update.ts";
+
+// pi-ai loads OAuth flows and bedrock through variable import specifiers resolved next to its own files, which a
+// release bundle does not have; these loaders use literal imports, so the bundle carries them.
+registerLazyOAuthFlows();
+registerLazyBedrockProvider();
 
 const command = parseCli(process.argv.slice(2), process.env.MAKORA_FAKE);
 process.exit(await main());
@@ -27,6 +38,9 @@ async function main(): Promise<number> {
 		case "help":
 			process.stdout.write(`${USAGE}\n`);
 			return 0;
+		case "version":
+			process.stdout.write(`${describeBuild(INSTALL.build)}\n`);
+			return 0;
 		case "error":
 			process.stderr.write(`makora: ${command.message}\n\n${USAGE}\n`);
 			return 2;
@@ -34,6 +48,10 @@ async function main(): Promise<number> {
 			return listCommand();
 		case "remove":
 			return removeCommand(command.id);
+		case "setup":
+			return setupCommand();
+		case "update":
+			return updateCommand();
 		case "run":
 			break;
 	}
@@ -102,6 +120,30 @@ function listCommand(): number {
 		process.stdout.write(`${meta.id}  ${updated}  ${tildify(meta.cwd)}  ${meta.title ?? "(untitled)"}\n`);
 	}
 	return 0;
+}
+
+/** `makora setup`: build the Python environment now, as install.sh does, so the first REPL cell does not wait. */
+async function setupCommand(): Promise<number> {
+	try {
+		const env = await ensurePythonEnv(makoraHome());
+		process.stdout.write(`Python environment ready: ${tildify(env.python)}\n`);
+		return 0;
+	} catch (error) {
+		process.stderr.write(`makora: ${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
+}
+
+/** `makora update`: run the release's installer, which reports the version change or that makora is up to date. */
+function updateCommand(): number {
+	const plan = updatePlan(INSTALL);
+	if (plan.kind === "refused") {
+		process.stderr.write(`makora: ${plan.reason}\n`);
+		return 1;
+	}
+	const result = spawnSync("sh", plan.args, { env: plan.env, stdio: "inherit" });
+	if (result.error) throw result.error;
+	return result.status ?? 1;
 }
 
 /** `makora rm <id>`: say what deleting the session removes and keeps, ask, then delete it. */
