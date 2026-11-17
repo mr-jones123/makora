@@ -2,6 +2,14 @@
 
 Generated from conventional commits by `scripts/release-plan.mjs` in the release PR; do not edit by hand.
 
+## [0.2.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.2.0) - 2026-11-17
+
+### Features
+
+- makora /diff full screen with f ([2553349](https://github.com/mr-jones123/makora/commit/2553349eabf4865921af57320f03b4e0510c2352))
+- makora names a session with the model, not just its first line ([930732a](https://github.com/mr-jones123/makora/commit/930732acbd9a5c4cf71653d698b48a1d87038df5))
+- makora /verify-rules, TLA+ rules checked across input values on one page ([c7e834f](https://github.com/mr-jones123/makora/commit/c7e834f1ed27b0f05dffe9e4682744b5b963bf14))
+
 ## [0.1.1](https://github.com/mr-jones123/makora/releases/tag/makora-v0.1.1) - 2026-11-17
 
 ### Fixes
