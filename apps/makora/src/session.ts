@@ -39,6 +39,7 @@ import {
 	sessionDir,
 	updateSession,
 } from "./sessions.ts";
+import { nameSession, titleOf } from "./title.ts";
 
 /**
  * A notice for the user about the session itself: `warning` for restored work and harness failures, `info` for news
@@ -90,6 +91,8 @@ export interface OpenOptions {
 	readonly askSetup?: (request: SetupRequest) => Promise<boolean>;
 	/** Open a saved quiz page; default the platform's browser opener. Tests pass their own. */
 	readonly openBrowser?: (path: string) => Promise<boolean>;
+	/** Called when the session's name changes, as when the model names it after the first turn. */
+	readonly onTitle?: () => void;
 }
 
 /** Where a session's state lives. */
@@ -97,8 +100,6 @@ type SessionStore =
 	| { readonly kind: "persistent"; readonly sessionsDir: string }
 	/** Durable's `MemoryStorage`: no session directory, no meta, no snapshots. */
 	| { readonly kind: "ephemeral" };
-
-const TITLE_LENGTH = 80;
 
 /**
  * Open the session `meta` for writing: take its lock, open its harness, make sure the root conversation exists with
@@ -203,7 +204,10 @@ async function open(
 		lock?.release();
 		throw error;
 	}
-	const update = (current: SessionMeta, change: Partial<Pick<SessionMeta, "title" | "model">>): SessionMeta =>
+	const update = (
+		current: SessionMeta,
+		change: Partial<Pick<SessionMeta, "title" | "titleSource" | "model">>,
+	): SessionMeta =>
 		store.kind === "persistent"
 			? updateSession(store.sessionsDir, current, change)
 			: { ...current, ...change, updatedAt: Date.now() };
@@ -241,6 +245,31 @@ async function open(
 		lock?.release();
 		throw error;
 	}
+
+	/**
+	 * Name the session with the model from its first message: at most one call at a time, and one that fails or
+	 * answers with no word leaves the first line the first input already gave the session.
+	 */
+	let naming: Promise<void> | undefined;
+	const nameLater = (first: string): void => {
+		if (naming !== undefined || current.titleSource === "model") return;
+		naming = (async () => {
+			const ref = app.settings.titleModel ?? (await root.agent(BACKGROUND_CONTEXT)).model;
+			if (ref === undefined) return;
+			const model = app.models.getModel(ref.provider, ref.modelId);
+			if (model === undefined) return;
+			const named = await nameSession(app.models, model, first, undefined);
+			if (named === undefined) return;
+			current = update(current, { title: named, titleSource: "model" });
+			options.onTitle?.();
+		})()
+			.catch(() => {
+				// A name is worth neither a failed turn nor a crash.
+			})
+			.finally(() => {
+				naming = undefined;
+			});
+	};
 
 	return {
 		harness,
@@ -280,8 +309,13 @@ async function open(
 				typeof input === "string"
 					? input
 					: input.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
-			const title = current.title ?? (text.trim().split("\n")[0]?.slice(0, TITLE_LENGTH) || undefined);
-			current = update(current, title === undefined ? {} : { title });
+			if (current.title === undefined) {
+				const first = titleOf(text);
+				if (first !== undefined) current = update(current, { title: first, titleSource: "first-line" });
+			}
+			// The first input names the session at once, and the model renames it from that input. An ephemeral session
+			// is never listed, so no model call is spent on a name nothing shows.
+			if (conversation.id === root.id && store.kind === "persistent") nameLater(text);
 			return submission;
 		},
 		async setModel(conversation, next, modelContext) {
@@ -289,6 +323,9 @@ async function open(
 			if (conversation.id === root.id) current = update(current, { model: `${next.provider}/${next.modelId}` });
 		},
 		async close() {
+			// A name still on its way is written before the process can go; it never waits on a cell or a provider.
+			const inFlight = naming;
+			if (inFlight !== undefined) await inFlight.catch(() => {});
 			// An ephemeral session leaves nothing behind but a write branch with work; its records are read before its
 			// storage goes with the harness.
 			const worktrees =

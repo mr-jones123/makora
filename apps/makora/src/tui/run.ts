@@ -317,7 +317,12 @@ class MakoraTui implements CommandHost {
 	}
 
 	#openOptions(model: ModelRef | undefined): OpenOptions {
-		return { ...(model === undefined ? {} : { model }), askSetup: (request) => this.#askSetup(request) };
+		return {
+			...(model === undefined ? {} : { model }),
+			askSetup: (request) => this.#askSetup(request),
+			// The model names the session after its first turn, and the bar shows the name as soon as it arrives.
+			onTitle: () => this.#tui.requestRender(),
+		};
 	}
 
 	/**

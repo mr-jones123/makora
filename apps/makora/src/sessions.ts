@@ -10,11 +10,19 @@ export interface SessionMeta {
 	readonly id: string;
 	readonly cwd: string;
 	readonly title?: string;
+	/** Where the title came from: the first line of the first input, or the model asked to name the session. */
+	readonly titleSource?: TitleSource;
 	readonly createdAt: number;
 	readonly updatedAt: number;
 	/** `provider/modelId` of the root conversation's model when last used. */
 	readonly model?: string;
 }
+
+/** What wrote a session's title. */
+export type TitleSource = "first-line" | "model";
+
+/** The fields of `SessionMeta` a session itself writes. */
+type WritableMeta = Pick<SessionMeta, "title" | "titleSource" | "model">;
 
 /** A held session lock; `release()` gives it up. */
 export interface SessionLock {
@@ -87,7 +95,7 @@ export function latestSession(sessionsDir: string, cwd: string): SessionMeta | u
 export function updateSession(
 	sessionsDir: string,
 	meta: SessionMeta,
-	change: Partial<Pick<SessionMeta, "title" | "model">>,
+	change: Partial<WritableMeta>,
 	now = Date.now(),
 ): SessionMeta {
 	const next: SessionMeta = { ...meta, ...change, updatedAt: now };
@@ -145,7 +153,7 @@ function writeAtomically(file: string, text: string): void {
 function parseMeta(raw: unknown): SessionMeta | undefined {
 	if (typeof raw !== "object" || raw === null) return undefined;
 	const value = raw as Record<string, unknown>;
-	const { id, cwd, title, createdAt, updatedAt, model } = value;
+	const { id, cwd, title, titleSource, createdAt, updatedAt, model } = value;
 	if (typeof id !== "string" || typeof cwd !== "string") return undefined;
 	if (typeof createdAt !== "number" || typeof updatedAt !== "number") return undefined;
 	return {
@@ -154,6 +162,7 @@ function parseMeta(raw: unknown): SessionMeta | undefined {
 		createdAt,
 		updatedAt,
 		...(typeof title === "string" ? { title } : {}),
+		...(titleSource === "first-line" || titleSource === "model" ? { titleSource } : {}),
 		...(typeof model === "string" ? { model } : {}),
 	};
 }

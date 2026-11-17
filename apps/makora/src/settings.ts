@@ -11,6 +11,8 @@ import { type PstackConfig, type PstackSettings, parsePstack, pstackConfig, psta
 export interface MakoraSettings {
 	readonly model?: ModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
+	/** The model that names sessions; default the one the conversation runs on. */
+	readonly titleModel?: ModelRef;
 	/** Whether persistent sessions snapshot REPL variables after each cell; default true. */
 	readonly snapshots?: boolean;
 	/** Where subagent worktrees go; defaults are the temp folder (review) and `<home>/worktrees` (write). */
@@ -34,6 +36,7 @@ export type SetupApproval = { readonly repository: string; readonly sha256: stri
 export interface SettingsFile {
 	readonly model: ModelRef | undefined;
 	readonly thinkingLevel: ModelThinkingLevel | undefined;
+	readonly titleModel: ModelRef | undefined;
 	readonly snapshots: boolean;
 	readonly worktrees: { readonly review?: string; readonly write?: string };
 	readonly maxRunningAgents: number;
@@ -95,6 +98,9 @@ export function openSettings(file: string): SettingsFile {
 		get thinkingLevel() {
 			return current().thinkingLevel;
 		},
+		get titleModel() {
+			return current().titleModel;
+		},
 		get snapshots() {
 			return current().snapshots ?? true;
 		},
@@ -143,13 +149,15 @@ type ParsedSettings = { readonly value: MakoraSettings; readonly warnings: reado
 // `settings.json` is user-edited: the trust boundary of settings.
 function parseSettings(raw: unknown): ParsedSettings {
 	if (typeof raw !== "object" || raw === null) return { value: {}, warnings: [] };
-	const { model, thinkingLevel, snapshots, worktrees, agents, pstack } = raw as Record<string, unknown>;
+	const { model, thinkingLevel, titleModel, snapshots, worktrees, agents, pstack } = raw as Record<string, unknown>;
 	const settings: {
 		-readonly [Key in keyof MakoraSettings]: MakoraSettings[Key];
 	} = {};
-	if (typeof model === "object" && model !== null) {
-		const { provider, modelId } = model as Record<string, unknown>;
-		if (typeof provider === "string" && typeof modelId === "string") settings.model = { provider, modelId };
+	for (const key of ["model", "titleModel"] as const) {
+		const ref = key === "model" ? model : titleModel;
+		if (typeof ref !== "object" || ref === null) continue;
+		const { provider, modelId } = ref as Record<string, unknown>;
+		if (typeof provider === "string" && typeof modelId === "string") settings[key] = { provider, modelId };
 	}
 	const level = MODEL_THINKING_LEVELS.find((candidate) => candidate === thinkingLevel);
 	if (level !== undefined) settings.thinkingLevel = level;
