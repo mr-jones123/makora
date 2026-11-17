@@ -1,7 +1,7 @@
 # Makora docs
 
-Makora is a self-evolving agent harness for long-running tasks, built on this fork of Pi
-(`github.com/mr-jones123/makora`, upstream `earendil-works/pi`). The app lives in `apps/makora`. These docs are the source
+Makora is a self-evolving agent harness for long-running tasks, built on Pi's packages in a standalone repository
+(`github.com/mr-jones123/makora`, started from `earendil-works/pi`). The app lives in `apps/makora`. These docs are the source
 of truth for what makora is, what it does today, how it is built, and what comes next. When code and docs disagree,
 fix one of them in the same change.
 
@@ -46,7 +46,7 @@ Details and open items: [roadmap.md](roadmap.md).
    - [architecture/quiz.md](architecture/quiz.md): the session quiz as built: the range, the bank's checks, the page,
      escaping.
 5. Reference: [reference/cli.md](reference/cli.md), [reference/configuration.md](reference/configuration.md).
-6. [development.md](development.md): working on makora, checks, tests, CI, upstream sync.
+6. [development.md](development.md): working on makora, checks, tests, CI, bringing in changes from pi.
 7. [decisions.md](decisions.md): every decision and its reason, newest last.
 
 ## Words used here
