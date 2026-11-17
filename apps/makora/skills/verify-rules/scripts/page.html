@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --fg: #16161a; --muted: #6b6b70; --line: #e4e4e0;
+    --ok: #1e7a4a; --bad: #b8342a; --accent: #2f5fd0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { padding: 22px 26px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  h1 { margin: 0; font-size: 19px; letter-spacing: -0.01em; font-weight: 600; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  #inputs { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 16px; }
+  .input label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 5px; }
+  .values { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel); }
+  .values button {
+    font: inherit; font-size: 13px; padding: 5px 13px; border: 0; background: transparent; cursor: pointer;
+    color: var(--fg); border-right: 1px solid var(--line);
+  }
+  .values button:last-child { border-right: 0; }
+  .values button[aria-pressed="true"] { background: var(--fg); color: var(--panel); }
+  .values button:hover:not([aria-pressed="true"]) { background: #f0f0ec; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 350px; align-items: start; }
+  .graph { padding: 24px 26px 40px; min-height: 300px; overflow-x: auto; }
+  .graph svg { width: 100%; height: auto; max-width: 760px; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); padding: 22px 22px 40px; min-height: calc(100vh - 90px); }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 26px 0 8px; font-weight: 600; }
+  aside h2:first-child { margin-top: 0; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  .rule { padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .rule .status { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .rule .status.holds { color: var(--ok); }
+  .rule .status.breaks { color: var(--bad); }
+  .rule .spread { color: var(--muted); font-size: 12px; }
+  #bugs button {
+    display: block; width: 100%; text-align: left; font: inherit; cursor: pointer; background: transparent;
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin-bottom: 7px; color: var(--fg);
+  }
+  #bugs button:hover { border-color: #c9c9c4; }
+  #bugs button[aria-pressed="true"] { border-color: var(--bad); background: #fdf3f2; }
+  #bugs .n { font-weight: 600; color: var(--bad); }
+  #bugs .end { font-size: 13px; }
+  #bugs .meta { color: var(--muted); font-size: 12px; }
+  .none { color: var(--muted); font-size: 13px; }
+  #view:empty { display: none; }
+  #view { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 4px; background: #fdf3f2; }
+  #view h3 { margin: 0 0 6px; font-size: 14px; }
+  #view pre { margin: 8px 0 0; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+  #view button { margin-top: 10px; font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:last-child { text-align: right; color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  footer { padding: 14px 26px 30px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <p id="subtitle"></p>
+  <div id="inputs"></div>
+</header>
+<main>
+  <section class="graph" id="graph"></section>
+  <aside>
+    <div id="view"></div>
+    <h2>Rules</h2>
+    <ul id="rules"></ul>
+    <h2 id="bugsTitle">Bugs in this run</h2>
+    <ul id="bugs"></ul>
+    <h2>Steps and the code they stand for</h2>
+    <table id="actions"></table>
+  </aside>
+</main>
+<footer id="foot"></footer>
+
+<script>__PELE__</script>
+<script>const DATA = __DATA__;</script>
+<script>
+"use strict";
+const inputs = Object.keys(DATA.inputs);
+const choice = {};
+for (const key of inputs) choice[key] = DATA.runs[0].assignment[key];
+let bug = null;
+const el = (id) => document.getElementById(id);
+const current = () => DATA.runs.find((run) => inputs.every((key) => run.assignment[key] === choice[key])) ?? DATA.runs[0];
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+function draw() {
+  const run = current();
+  const words = inputs.map((key) => `${key} = ${choice[key]}`).join(", ");
+  el("title").textContent = `${DATA.spec}: ${words || "one run"}`;
+  el("subtitle").textContent =
+    `${run.chart.states} states and ${run.chart.transitions} transitions in the model, ` +
+    `${run.chart.works} work, ${run.chart.wrong} break a rule` +
+    (DATA.runs.length > 1 ? `, out of ${plural(DATA.runs.length, "run", "runs")}` : "");
+  drawInputs();
+  drawGraph(run);
+  drawRules(run);
+  drawBugs(run);
+  drawActions(run);
+  drawView(run);
+  el("foot").textContent =
+    "TLC checked every order of steps in this model, under these input values. " +
+    "A pass covers the model and the values shown here, not the product.";
+}
+
+function drawInputs() {
+  const holder = el("inputs");
+  holder.textContent = "";
+  for (const key of inputs) {
+    const box = document.createElement("div");
+    box.className = "input";
+    const label = document.createElement("label");
+    label.textContent = key;
+    const values = document.createElement("div");
+    values.className = "values";
+    for (const value of DATA.inputs[key]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = value;
+      b.setAttribute("aria-pressed", String(choice[key] === value));
+      b.onclick = () => {
+        choice[key] = value;
+        bug = null;
+        draw();
+      };
+      values.append(b);
+    }
+    box.append(label, values);
+    holder.append(box);
+  }
+}
+
+function drawGraph(run) {
+  const graph = el("graph");
+  const text = bug === null ? run.mmd : run.bugMmd[bug];
+  try {
+    graph.innerHTML = pele.render(text).svg;
+  } catch (error) {
+    graph.textContent = `This chart did not render: ${error.message}`;
+  }
+}
+
+function drawRules(run) {
+  const list = el("rules");
+  list.textContent = "";
+  for (const rule of DATA.rules) {
+    const li = document.createElement("li");
+    li.className = "rule";
+    const broken = run.broken.includes(rule.name);
+    const elsewhere = DATA.runs.filter((r) => r.broken.includes(rule.name)).length;
+    const status = document.createElement("span");
+    status.className = `status ${broken ? "breaks" : "holds"}`;
+    status.textContent = broken ? "breaks here" : "holds here";
+    const sentence = document.createElement("div");
+    sentence.textContent = rule.sentence || rule.name;
+    li.append(status, sentence);
+    if (DATA.runs.length > 1) {
+      const spread = document.createElement("div");
+      spread.className = "spread";
+      spread.textContent = broken
+        ? `breaks in ${plural(elsewhere, "run", "runs")} of ${DATA.runs.length}`
+        : elsewhere > 0
+          ? `breaks in ${plural(elsewhere, "other run", "other runs")}`
+          : "never breaks";
+      li.append(spread);
+    }
+    list.append(li);
+  }
+}
+
+function drawBugs(run) {
+  const list = el("bugs");
+  list.textContent = "";
+  el("bugsTitle").textContent = DATA.runs.length > 1 ? "Bugs in this run" : "Bugs";
+  if (run.bugs.length === 0) {
+    const li = document.createElement("li");
+    li.className = "none";
+    li.textContent = "No rule breaks with these input values.";
+    list.append(li);
+    return;
+  }
+  for (const found of run.bugs) {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-pressed", String(bug === found.n));
+    const head = document.createElement("div");
+    const n = document.createElement("span");
+    n.className = "n";
+    n.textContent = `Bug ${found.n}`;
+    head.append(n);
+    const end = document.createElement("div");
+    end.className = "end";
+    end.textContent = `Ends in “${found.end}”`;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${plural(found.readerSteps, "step", "steps")}, breaks ${found.invariant}`;
+    b.append(head, end, meta);
+    b.onclick = () => {
+      bug = bug === found.n ? null : found.n;
+      draw();
+    };
+    li.append(b);
+    list.append(li);
+  }
+}
+
+function drawActions(run) {
+  const table = el("actions");
+  table.textContent = "";
+  const names = Object.keys(run.actions);
+  if (names.length === 0) {
+    const row = table.insertRow();
+    const cell = row.insertCell();
+    cell.className = "none";
+    cell.textContent = "The model names no code for its steps yet.";
+    return;
+  }
+  for (const name of names.sort()) {
+    const row = table.insertRow();
+    row.insertCell().textContent = name;
+    row.insertCell().textContent = run.actions[name];
+  }
+}
+
+function drawView(run) {
+  const view = el("view");
+  view.textContent = "";
+  if (bug === null) return;
+  const found = run.bugs.find((b) => b.n === bug);
+  if (found === undefined) return;
+  const title = document.createElement("h3");
+  title.textContent = `Bug ${found.n}: ${found.invariant}`;
+  const rule = document.createElement("div");
+  rule.textContent = found.rule || "";
+  const story = document.createElement("pre");
+  story.textContent = run.stories[bug] || "";
+  const back = document.createElement("button");
+  back.type = "button";
+  back.textContent = "Show the whole model";
+  back.onclick = () => {
+    bug = null;
+    draw();
+  };
+  view.append(title, rule, story, back);
+}
+
+draw();
+</script>
+</body>
+</html>
