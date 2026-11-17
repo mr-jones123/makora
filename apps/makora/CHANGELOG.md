@@ -2,6 +2,12 @@
 
 Generated from conventional commits by `scripts/release-plan.mjs` in the release PR; do not edit by hand.
 
+## [0.1.1](https://github.com/mr-jones123/makora/releases/tag/makora-v0.1.1) - 2026-11-17
+
+### Fixes
+
+- makora images: Ctrl+V paste, images sent with messages, and show() from cells ([fec0141](https://github.com/mr-jones123/makora/commit/fec014195d9538ae3f9929794fdd33f72fb22150))
+
 ## [0.1.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.1.0) - 2026-11-17
 
 ### Features
