@@ -41,8 +41,8 @@ function isPasteMarker(segment: string): boolean {
 
 /**
  * A segmenter that wraps Intl.Segmenter and merges graphemes that fall
- * within paste markers into single atomic segments.  This makes cursor
- * movement, deletion, word-wrap, etc. treat paste markers as single units.
+ * within paste markers or atomic tokens into single atomic segments.  This
+ * makes cursor movement, deletion, word-wrap, etc. treat them as single units.
  *
  * Only markers whose numeric ID exists in `validIds` are merged.
  */
@@ -50,18 +50,31 @@ function segmentWithMarkers(
 	text: string,
 	baseSegmenter: Intl.Segmenter,
 	validIds: Set<number>,
+	atomicTokens: readonly string[],
 ): Iterable<Intl.SegmentData> {
-	// Fast path: no paste markers in the text or no valid IDs.
-	if (validIds.size === 0 || !text.includes("[paste #")) {
+	// Fast path: no paste markers in the text or no valid IDs, and no atomic tokens.
+	if ((validIds.size === 0 || !text.includes("[paste #")) && atomicTokens.length === 0) {
 		return baseSegmenter.segment(text);
 	}
 
-	// Find all marker spans with valid IDs.
-	const markers: Array<{ start: number; end: number }> = [];
+	// Find all marker spans with valid IDs, and every occurrence of an atomic token.
+	const spans: Array<{ start: number; end: number }> = [];
 	for (const m of text.matchAll(PASTE_MARKER_REGEX)) {
 		const id = Number.parseInt(m[1]!, 10);
 		if (!validIds.has(id)) continue;
-		markers.push({ start: m.index, end: m.index + m[0].length });
+		spans.push({ start: m.index, end: m.index + m[0].length });
+	}
+	for (const token of atomicTokens) {
+		if (token === "") continue;
+		for (let at = text.indexOf(token); at !== -1; at = text.indexOf(token, at + token.length)) {
+			spans.push({ start: at, end: at + token.length });
+		}
+	}
+	spans.sort((a, b) => a.start - b.start);
+	// A span overlapping an earlier one stays split.
+	const markers: Array<{ start: number; end: number }> = [];
+	for (const span of spans) {
+		if (span.start >= (markers.at(-1)?.end ?? 0)) markers.push(span);
 	}
 	if (markers.length === 0) {
 		return baseSegmenter.segment(text);
@@ -119,9 +132,16 @@ export interface TextChunk {
  * @param maxWidth - Maximum visible width per chunk
  * @param preSegmented - Optional pre-segmented graphemes (e.g. with paste-marker awareness).
  *                       When omitted the default Intl.Segmenter is used.
+ * @param isAtomic - Whether a segment of `preSegmented` is a merged unit, such as a paste marker,
+ *                   whose spaces are not break opportunities. Default: paste markers.
  * @returns Array of chunks with text and position information
  */
-export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl.SegmentData[]): TextChunk[] {
+export function wordWrapLine(
+	line: string,
+	maxWidth: number,
+	preSegmented?: Intl.SegmentData[],
+	isAtomic: (segment: string) => boolean = isPasteMarker,
+): TextChunk[] {
 	if (!line || maxWidth <= 0) {
 		return [{ text: "", startIndex: 0, endIndex: 0 }];
 	}
@@ -147,7 +167,7 @@ export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl
 		const grapheme = seg.segment;
 		const gWidth = visibleWidth(grapheme);
 		const charIndex = seg.index;
-		const isWs = !isPasteMarker(grapheme) && isWhitespaceChar(grapheme);
+		const isWs = !isAtomic(grapheme) && isWhitespaceChar(grapheme);
 
 		// Overflow check before advancing.
 		if (currentWidth + gWidth > maxWidth) {
@@ -196,12 +216,12 @@ export function wordWrapLine(line: string, maxWidth: number, preSegmented?: Intl
 		// or at a boundary where either side is CJK (CJK allows breaking
 		// between any adjacent characters).
 		const next = segments[i + 1];
-		if (isWs && next && (isPasteMarker(next.segment) || !isWhitespaceChar(next.segment))) {
+		if (isWs && next && (isAtomic(next.segment) || !isWhitespaceChar(next.segment))) {
 			wrapOppIndex = next.index;
 			wrapOppWidth = currentWidth;
 		} else if (!isWs && next && !isWhitespaceChar(next.segment)) {
-			const isCjk = !isPasteMarker(grapheme) && cjkBreakRegex.test(grapheme);
-			const nextIsCjk = !isPasteMarker(next.segment) && cjkBreakRegex.test(next.segment);
+			const isCjk = !isAtomic(grapheme) && cjkBreakRegex.test(grapheme);
+			const nextIsCjk = !isAtomic(next.segment) && cjkBreakRegex.test(next.segment);
 			if (isCjk || nextIsCjk) {
 				wrapOppIndex = next.index;
 				wrapOppWidth = currentWidth;
@@ -375,6 +395,12 @@ export class Editor implements Component, Focusable {
 	public onSubmit?: (text: string) => void;
 	public onChange?: (text: string) => void;
 	public disableSubmit: boolean = false;
+	/**
+	 * Text the editor keeps whole besides paste markers, such as an attachment token `[image #1]`: cursor movement,
+	 * deletion, and wrapping treat each occurrence as one character. The text is unchanged; the owner of the tokens
+	 * decides what they stand for.
+	 */
+	public atomicTokens: readonly string[] = [];
 
 	constructor(tui: TUI, theme: EditorTheme, options: EditorOptions = {}) {
 		this.tui = tui;
@@ -391,9 +417,19 @@ export class Editor implements Component, Focusable {
 		return new Set(this.pastes.keys());
 	}
 
-	/** Segment text with paste-marker awareness, only merging markers with valid IDs. */
+	/** Segment text with paste-marker awareness, only merging markers with valid IDs, and atomic tokens. */
 	private segment(text: string, mode: "word" | "grapheme"): Iterable<Intl.SegmentData> {
-		return segmentWithMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter, this.validPasteIds());
+		return segmentWithMarkers(
+			text,
+			mode === "word" ? wordSegmenter : graphemeSegmenter,
+			this.validPasteIds(),
+			this.atomicTokens,
+		);
+	}
+
+	/** Whether a segment of `segment()` is one merged unit: a paste marker or an atomic token. */
+	private isAtomicSegment(segment: string): boolean {
+		return isPasteMarker(segment) || this.atomicTokens.includes(segment);
 	}
 
 	getPaddingX(): number {
@@ -1040,7 +1076,9 @@ export class Editor implements Component, Focusable {
 				}
 			} else {
 				// Line needs wrapping - use word-aware wrapping
-				const chunks = wordWrapLine(line, contentWidth, [...this.segment(line, "grapheme")]);
+				const chunks = wordWrapLine(line, contentWidth, [...this.segment(line, "grapheme")], (segment) =>
+					this.isAtomicSegment(segment),
+				);
 
 				for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
 					const chunk = chunks[chunkIndex];
@@ -1856,7 +1894,9 @@ export class Editor implements Component, Focusable {
 				visualLines.push({ logicalLine: i, startCol: 0, length: line.length });
 			} else {
 				// Line needs wrapping - use word-aware wrapping
-				const chunks = wordWrapLine(line, width, [...this.segment(line, "grapheme")]);
+				const chunks = wordWrapLine(line, width, [...this.segment(line, "grapheme")], (segment) =>
+					this.isAtomicSegment(segment),
+				);
 				for (const chunk of chunks) {
 					visualLines.push({
 						logicalLine: i,
@@ -1997,7 +2037,7 @@ export class Editor implements Component, Focusable {
 		this.setCursorCol(
 			findWordBackward(currentLine, this.state.cursorCol, {
 				segment: (text) => this.segment(text, "word"),
-				isAtomicSegment: isPasteMarker,
+				isAtomicSegment: (segment) => this.isAtomicSegment(segment),
 			}),
 		);
 	}
@@ -2191,7 +2231,7 @@ export class Editor implements Component, Focusable {
 		this.setCursorCol(
 			findWordForward(currentLine, this.state.cursorCol, {
 				segment: (text) => this.segment(text, "word"),
-				isAtomicSegment: isPasteMarker,
+				isAtomicSegment: (segment) => this.isAtomicSegment(segment),
 			}),
 		);
 	}

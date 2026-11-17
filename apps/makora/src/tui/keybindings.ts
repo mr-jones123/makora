@@ -20,6 +20,11 @@ export const MAKORA_KEYBINDINGS = {
 	"app.agents": { defaultKeys: "ctrl+a", description: "agents" },
 	"app.model.select": { defaultKeys: "ctrl+l", description: "model" },
 	"app.diff": { defaultKeys: "ctrl+g", description: "diff" },
+	// As in pi: Windows terminals take ctrl+v for their own paste, so alt+v is there too.
+	"app.clipboard.pasteImage": {
+		defaultKeys: process.platform === "win32" ? ["alt+v", "ctrl+v"] : "ctrl+v",
+		description: "paste image",
+	},
 	// The agents dashboard's own keys; only that view reads them.
 	"app.agents.diff": { defaultKeys: "d", description: "diff" },
 	"app.agents.merge": { defaultKeys: "m", description: "merge" },

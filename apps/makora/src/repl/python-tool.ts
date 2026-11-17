@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import type { Context } from "@earendil-works/chord/context";
 import type { JsonRepresentation } from "@earendil-works/chord/json";
-import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import type { ImageContent, ToolResultMessage } from "@earendil-works/pi-ai";
 import {
 	type ConversationId,
 	defineDoc,
@@ -14,8 +14,9 @@ import {
 	type ToolExecutionResult,
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
-import type { ReadToolDetails } from "@earendil-works/pi-durable/tools";
+import type { ImageProcessor, ReadToolDetails } from "@earendil-works/pi-durable/tools";
 import { num, obj, opt, str } from "@earendil-works/pi-schema";
+import { describeImage, type ImageModel, imageModel, MAX_IMAGES, prepareImage } from "../images.ts";
 import { describeExit, type Kernel } from "../kernel/kernel.ts";
 import type { KernelManager } from "../kernel/manager.ts";
 import type { AgentAction, ExecuteResult, HostRequest, SnapshotManifest } from "../kernel/protocol.ts";
@@ -48,6 +49,8 @@ export interface PythonToolOptions {
 	readonly snapshots: SnapshotPolicy;
 	/** The cwd of a conversation whose agent sets none. */
 	readonly defaultCwd: string;
+	/** Prepares the images a cell shows the model. */
+	readonly images: ImageProcessor;
 }
 
 const PythonParameters = obj({
@@ -126,7 +129,7 @@ async function runCell(
 		timeoutMs,
 		{
 			stream: (_stream, text) => output.add(text),
-			hostRequest: (request) => answerHost(request, calls, api, context),
+			hostRequest: (request) => answerHost(request, calls, output, options.images, api, context),
 		},
 		context,
 	);
@@ -266,6 +269,8 @@ function describeResult(cell: number, result: ExecuteResult, problem: string | u
 async function answerHost(
 	request: HostRequest,
 	calls: CallLog,
+	output: CellOutput,
+	images: ImageProcessor,
 	api: ToolExecutionApi,
 	context: Context,
 ): Promise<unknown> {
@@ -299,6 +304,9 @@ async function answerHost(
 				(await nestedTool("quiz_publish", request.params as JsonObject, request.requestId, calls, api, context))
 					.structuredOutput ?? ""
 			);
+		case "show":
+			// `data` is the kernel's base64, decoded and sniffed before Photon reads it.
+			return output.show(request.params.data, imageModel((await api.agent(context)).model, api.models), images);
 	}
 }
 
@@ -397,9 +405,10 @@ function preview(args: JsonObject): JsonObject {
 
 const STREAM_TAIL = 16_000;
 
-/** A cell's output: streamed live through `api.output`, and kept as a bounded tail for the model. */
+/** A cell's output: streamed live through `api.output`, and kept as a bounded tail for the model with its images. */
 class CellOutput {
 	readonly #api: ToolExecutionApi<PythonDetails>;
+	readonly #images: ImageContent[] = [];
 	#notice: string | undefined;
 	#text = "";
 	#omitted = 0;
@@ -422,7 +431,29 @@ class CellOutput {
 		}
 	}
 
-	/** The model's view: the notice, the output tail, then `ending`. */
+	/**
+	 * Attach image `data` (base64) to the result, prepared to `model`'s limits, at most `MAX_IMAGES` per cell; the
+	 * output gets a line saying what the model will see, or why it will not.
+	 */
+	async show(data: string, model: ImageModel, images: ImageProcessor): Promise<void> {
+		const shown = !model.vision
+			? { kind: "refused" as const, reason: `${model.name} cannot see images` }
+			: this.#images.length >= MAX_IMAGES
+				? { kind: "refused" as const, reason: `a cell shows at most ${MAX_IMAGES} images` }
+				: await prepareImage(Buffer.from(data, "base64"), model.limits, images);
+		if (shown.kind === "refused") {
+			this.add(`image not shown: ${shown.reason}\n`);
+			return;
+		}
+		this.#images.push(shown.image);
+		const from =
+			shown.resizedFrom === undefined
+				? ""
+				: ` (resized from ${shown.resizedFrom.width}×${shown.resizedFrom.height})`;
+		this.add(`image · ${describeImage(shown.image)}${from}\n`);
+	}
+
+	/** The model's view: the notice, the output tail, then `ending`; then the images the cell showed. */
 	result(ending: string): ToolResultMessage["content"] {
 		let stream = this.#text.length > STREAM_TAIL ? this.#text.slice(-STREAM_TAIL) : this.#text;
 		const omitted = this.#omitted + (this.#text.length - stream.length);
@@ -430,7 +461,7 @@ class CellOutput {
 		const text = [this.#notice, stream.trimEnd(), ending]
 			.filter((part) => part !== undefined && part !== "")
 			.join("\n");
-		return [{ type: "text", text: text || "(no output)" }];
+		return [{ type: "text", text: text || "(no output)" }, ...this.#images];
 	}
 }
 

@@ -1,5 +1,5 @@
 // Transcript rows: a conversation's committed entries and live state turned into the rows a transcript shows.
-import type { AssistantMessage, Message, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, Message, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { EntryRecord, LiveState, NestedToolSlot, ToolSlot } from "@earendil-works/pi-durable";
 import {
 	AGENT_MESSAGE_ENTRY,
@@ -8,12 +8,14 @@ import {
 	type AgentResultData,
 	describeState,
 } from "./agents/prompts.ts";
+import { describeImage } from "./images.ts";
 import { pythonDetails } from "./repl/details.ts";
 import type { NestedCell, ToolCell, ToolCellStatus } from "./tool-cell.ts";
 
 /** One row of a transcript, in display order. */
 export type TranscriptRow =
-	| { readonly kind: "user"; readonly key: string; readonly text: string }
+	/** `images` describe the message's images in order (`png · 1280×800`); its text names them `[image #N]`. */
+	| { readonly kind: "user"; readonly key: string; readonly text: string; readonly images: readonly string[] }
 	| { readonly kind: "assistant"; readonly key: string; readonly text: string; readonly streaming: boolean }
 	| { readonly kind: "thinking"; readonly key: string; readonly text: string }
 	| { readonly kind: "tool"; readonly key: string; readonly cell: ToolCell }
@@ -68,6 +70,12 @@ export function messageText(message: Message): string {
 	if (message.role === "system") return "";
 	if (typeof message.content === "string") return message.content;
 	return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+}
+
+/** The image blocks of a user or tool result message, in order. */
+export function messageImages(message: Message): ImageContent[] {
+	if (message.role === "system" || message.role === "assistant" || typeof message.content === "string") return [];
+	return message.content.filter((part) => part.type === "image");
 }
 
 /** When an assistant message's response ended, which is when its tool calls start. */
@@ -142,7 +150,9 @@ function entryRows(
 	switch (entry.kind) {
 		case "pi.user": {
 			const message = entry.model?.[0];
-			return message === undefined ? [] : [{ kind: "user", key, text: messageText(message) }];
+			return message === undefined
+				? []
+				: [{ kind: "user", key, text: messageText(message), images: messageImages(message).map(describeImage) }];
 		}
 		case "pi.assistant": {
 			const message = entry.model?.[0];

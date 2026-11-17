@@ -240,3 +240,24 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   that PR tags `makora-vX.Y.Z` and publishes the GitHub release after the check, the tests and a smoke run of the
   build. The PR is where the owner sees what the next release says and decides when it ships; releasing every push
   would publish each fix separately, with nobody reading the notes first.
+- **Images: makora reads the clipboard itself, and fits images with Durable's Photon worker (builder, 2026-11-17).**
+  pi's coding agent reads clipboard images in `utils/clipboard-image.ts` with its helpers, but its package exports none
+  of them, and makora does not depend on it. Moving them into `packages/tui` was the preferred reuse; it was not done
+  because the files keep changing upstream (five commits between 2026-09-28 and 2026-10-30), so every later upstream
+  fix would conflict with the move, their 790 lines of tests mock modules with vitest while pi-tui tests with
+  `node:test`, and BMP conversion needs
+  Photon, which pi-tui does not carry. `src/tui/clipboard.ts` is 60 lines over pi-tui's exported `getNativeClipboard()`
+  (macOS, Windows, Linux X11), giving up only pi's Wayland and WSL command paths. Images are fitted by Durable's
+  `createNodePhotonImages()`, the processor `read` already supports, in a worker thread: pi's 2000×2000 pixels and
+  4.5 MB of base64, so a model's limit is "about 5 MB" with headroom. The release ships `node-worker.js` beside
+  `makora.mjs` and Photon's `.wasm` under `node_modules/@silvia-odwyer/photon/`, where the worker resolves it. The
+  limits (4 per message or cell, the per-image size) are not settings: they follow the provider limits, not taste.
+- **An attached image is a token in the text (builder, 2026-11-17).** The draft keeps `[image #N]` in its text, kept
+  whole by pi-tui's new `Editor.atomicTokens`, and the attachments are derived from the tokens present, so deleting,
+  undoing and restoring a draft need no separate state. On send the tokens are renumbered 1, 2, … in order and the
+  images follow the text in that order, so the model can tell which image a sentence means.
+- **`show(image)` is the cell helper's name (builder, 2026-11-17).** It says what happens: the model is shown the
+  image. `display` was rejected because in Jupyter it renders any object, which the model would expect for a
+  DataFrame; `attach` describes the mechanism rather than the effect. It is synchronous like `ctx.input()`, so it works
+  in plain loops, and it reports in the cell's output instead of raising when an image is refused, so one bad image
+  does not lose the cell's other work.

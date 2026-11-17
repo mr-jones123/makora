@@ -58,6 +58,7 @@ Makora's own:
 | `app.agents` | `ctrl+a` |
 | `app.model.select` | `ctrl+l` |
 | `app.diff` | `ctrl+g` |
+| `app.clipboard.pasteImage` | `ctrl+v`; on Windows also `alt+v` |
 | `app.agents.diff` | `d`; read only in the agents dashboard |
 | `app.agents.merge` | `m`; read only in the agents dashboard |
 | `app.agents.stop` | `s`; read only in the agents dashboard |

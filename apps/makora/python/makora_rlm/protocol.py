@@ -72,12 +72,12 @@ class RestoreFailure(TypedDict):
 
 AgentAction = Literal["spawn", "collect", "send", "merge", "stop", "remove", "list", "get", "recent"]
 
-HostMethod = Literal["tool", "llm", "ctx", "agents", "quiz"]
+HostMethod = Literal["tool", "llm", "ctx", "agents", "quiz", "show"]
 
 
 class HostRequest(TypedDict):
-    """A helper's call into makora: `tool`, `llm`, `ctx`, `agents` with `{"action": AgentAction, "args": ...}`, or
-    `quiz` with `{"bank": ...}`."""
+    """A helper's call into makora: `tool`, `llm`, `ctx`, `agents` with `{"action": AgentAction, "args": ...}`, `quiz`
+    with `{"bank": ...}`, or `show` with `{"data": <base64 of an image>}`."""
 
     type: Literal["host_request"]
     requestId: str

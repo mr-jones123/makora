@@ -120,8 +120,8 @@ compacts now. The activity row shows the compaction state.
 ## Forks
 
 `/fork` branches the active conversation before an earlier message. Pick the message (newest first); the fork shares
-the history up to just before it, becomes the active conversation, and gets the message in the editor to edit and send
-again. The original conversation stays as it was. Forking needs a second message: the first has nothing before it.
+the history up to just before it, becomes the active conversation, and gets the message in the editor, with its images
+attached, to edit and send again. The original conversation stays as it was. Forking needs a second message: the first has nothing before it.
 
 What the fork starts with:
 

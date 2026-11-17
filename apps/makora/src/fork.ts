@@ -4,6 +4,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import {
 	type Conversation,
 	type ConversationId,
@@ -17,7 +18,7 @@ import {
 import { pythonDetails } from "./repl/details.ts";
 import { commitTree, git } from "./repl/git-tree.ts";
 import type { MakoraSession } from "./session.ts";
-import { messageText } from "./transcript-rows.ts";
+import { messageImages, messageText } from "./transcript-rows.ts";
 import { addWorktree, findRepo, type RepoPlace, removeWorktree, worktreePath } from "./worktrees.ts";
 
 /** Where a fork's files live. */
@@ -44,8 +45,16 @@ export type ForkRecord = {
 /** A fork of the session. */
 export type Fork = { readonly conversationId: ConversationId; readonly record: ForkRecord };
 
-/** A user message a fork can start before: the fork shares history through `at`, the entry before `message`. */
-export type ForkPoint = { readonly message: EntryId; readonly at: EntryId; readonly text: string };
+/**
+ * A user message a fork can start before: the fork shares history through `at`, the entry before `message`. `text`
+ * and `images` are the message's, to send again.
+ */
+export type ForkPoint = {
+	readonly message: EntryId;
+	readonly at: EntryId;
+	readonly text: string;
+	readonly images: readonly ImageContent[];
+};
 
 /** A new fork, and what the user should know about its files. */
 export type CreatedFork = Fork & { readonly conversation: Conversation; readonly notice?: string };
@@ -68,13 +77,13 @@ const FORK_KEY = "fork";
 /** The user messages of `conversation` that have an entry before them, newest first. */
 export async function forkPoints(conversation: Conversation, context: Context): Promise<ForkPoint[]> {
 	const points: ForkPoint[] = [];
-	let after: { readonly message: EntryId; readonly text: string } | undefined;
+	let after: Omit<ForkPoint, "at"> | undefined;
 	for await (const entry of newestFirst(conversation, undefined, context)) {
 		if (after !== undefined) points.push({ ...after, at: entry.id });
 		const message = entry.model?.[0];
 		after =
 			entry.kind === "pi.user" && message !== undefined
-				? { message: entry.id, text: messageText(message) }
+				? { message: entry.id, text: messageText(message), images: messageImages(message) }
 				: undefined;
 	}
 	return points;

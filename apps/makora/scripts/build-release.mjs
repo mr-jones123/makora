@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// Builds a makora release: one bundle of makora with the fork's packages/* sources, its runtime files, and a tarball
-// with its sha256, in dist/release/. A release has no npm dependencies.
+// Builds a makora release: one bundle of makora with the fork's packages/* sources, the bundle of Durable's image
+// worker beside it, its runtime files, and a tarball with its sha256, in dist/release/. A release installs no npm
+// dependencies; Photon's WebAssembly ships as the one file of its package that the worker reads.
 // Usage: npm run build:release [-- --version <x.y.z>]   (default: the version in package.json)
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -27,11 +29,11 @@ const dir = join(out, name);
 rmSync(dir, { recursive: true, force: true });
 mkdirSync(dir, { recursive: true });
 
-/** Bundle src/main.ts with every workspace package resolved to its sources; returns the bundled npm packages. */
-async function bundle(outfile) {
+/** Bundle `entry` with every workspace package resolved to its sources; returns the bundled npm packages. */
+async function bundle(entry, outfile) {
 	const result = await build({
 		absWorkingDir: APP,
-		entryPoints: ["src/main.ts"],
+		entryPoints: [entry],
 		outfile,
 		bundle: true,
 		platform: "node",
@@ -76,6 +78,12 @@ function copyRuntimeFiles() {
 		filter: (source) => !source.includes("__pycache__"),
 	});
 	cpSync(join(APP, "install.sh"), join(dir, "install.sh"));
+	// Durable's image worker reads Photon's WebAssembly through the package's path, from beside the bundle.
+	const photon = dirname(DURABLE_REQUIRE.resolve("@silvia-odwyer/photon/package.json"));
+	const photonDir = join(dir, "node_modules", "@silvia-odwyer", "photon");
+	mkdirSync(photonDir, { recursive: true });
+	for (const file of ["package.json", "photon_rs_bg.wasm", "LICENSE.md"])
+		cpSync(join(photon, file), join(photonDir, file));
 	// pi-tui's optional native helpers (modifier keys, clipboard images) are looked up next to the bundle.
 	for (const platform of ["darwin", "linux"]) {
 		const prebuilds = join("native", platform, "prebuilds");
@@ -179,7 +187,17 @@ function fail(message) {
 	process.exit(1);
 }
 
-const bundled = await bundle(join(dir, "makora.mjs"));
+// `createNodePhotonImages()` starts `node-worker.js` from beside the code that calls it, which is makora.mjs.
+const DURABLE_REQUIRE = createRequire(join(REPO, "packages", "durable", "package.json"));
+const bundled = [
+	...new Set([
+		...(await bundle("src/main.ts", join(dir, "makora.mjs"))),
+		...(await bundle(
+			join(REPO, "packages", "durable", "src", "images", "node-worker.ts"),
+			join(dir, "node-worker.js"),
+		)),
+	]),
+].sort();
 copyRuntimeFiles();
 writeFileSync(
 	join(dir, "package.json"),

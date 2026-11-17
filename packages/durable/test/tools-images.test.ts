@@ -550,6 +550,13 @@ describe("createNodePhotonImages", () => {
 		expect(png).toEqual(copy);
 	}, 60_000);
 
+	it("keeps the caller's bytes when they are a Node Buffer", async () => {
+		const png = Buffer.from(noisyPng(64, 64));
+		const copy = Buffer.from(png);
+		await processor.prepare(png, "image/png", DEFAULT_IMAGE_LIMITS);
+		expect(png.equals(copy)).toBe(true);
+	});
+
 	it("prepares concurrent images, and starts a new worker after the idle one exited", async () => {
 		const images = await createNodePhotonImages({ idleMs: 10 });
 		const results = await Promise.all([

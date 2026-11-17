@@ -153,6 +153,26 @@ Open items of the quiz:
 | A page holds every diff of its range (4.2 MB for makora's 12 commits and 45 comments) | A cap per commit, or a more compact row encoding, if larger ranges make pages slow |
 | `/quiz all` leaves finding the project's first commit to the agent | A project setting, if the agent's choice proves unreliable |
 
+## Images (built)
+
+Ctrl+V pastes a clipboard image into the draft as an `[image #N]` token with an attachment line, copied files as
+paths, or text; the message then carries its images to the model, which must take images, at most 4 of at most 4.5 MB
+each after Photon fits them ([features/tui.md](features/tui.md#images)). A cell shows the model an image with
+`show(image)` ([features/repl.md](features/repl.md#showing-the-model-an-image)). Verified with unit tests of the paste
+order, the tokens and the refusals (`test/clipboard.test.ts`, `test/attachments.test.ts`), the fake model end to end
+(`test/images.test.ts`: persistence and resume, `/fork`, waking a subagent, history without base64, every `show()`
+argument type, the per-cell limit, a model without images), a tmux run at 140x40 that pastes a real PNG from the
+macOS clipboard (`scripts/tmux-images.sh`), and the release bundle run from `/tmp`.
+
+Open items of images:
+
+| Item | Needs |
+| --- | --- |
+| Images are not drawn in the transcript, only named | pi-tui `Image` rows inside the transcript's `ScrollView`, tried on kitty and iTerm2 |
+| No clipboard under Wayland alone (no `DISPLAY`) | `wl-paste`, as pi's coding agent reads it |
+| A fifth image is refused at Enter, not when it is pasted | A notice at paste time, if the late refusal proves annoying |
+| A model's `inputLimits.images.maxPerMessage` is not read; the cap is 4 | A model that declares fewer |
+
 ## Later phases (planned)
 
 4. Long-running operation: a background service with one worker process per session, attach and detach, goals,

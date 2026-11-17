@@ -1,10 +1,14 @@
 """The functions a cell calls into makora: Durable's coding tools, one model call, the conversation's context, its
-subagents, and the session quiz."""
+subagents, the session quiz, and showing the model an image."""
 
 # `Agents.list` shadows the builtin inside its class body; postponed annotations keep `list[...]` meaning the builtin.
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
+import os
+import sys
 from typing import Any, Protocol
 
 from makora_rlm.protocol import HostMethod
@@ -105,6 +109,37 @@ def _defined(value: Any) -> Any:
     return value
 
 
+# The most `show()` sends to makora, which then shrinks the image to the model's limits; as pi caps clipboard reads.
+MAX_SHOW_BYTES = 50 * 1024 * 1024
+
+# Modes a PNG can hold; other PIL images are converted to RGBA first.
+PNG_MODES = ("1", "L", "LA", "P", "RGB", "RGBA", "I;16")
+
+
+def _image_data(image: Any) -> str:
+    """The base64 of what `show()` was given: a path, bytes, the dict `await read(path)` returns for an image, or a PIL
+    image (looked up only once the cell imported PIL)."""
+    if isinstance(image, dict) and image.get("type") == "image" and isinstance(image.get("data"), str):
+        return image["data"]
+    pil = sys.modules.get("PIL.Image")
+    if isinstance(image, (str, os.PathLike)):
+        with open(image, "rb") as file:
+            data = file.read(MAX_SHOW_BYTES + 1)
+    elif isinstance(image, (bytes, bytearray, memoryview)):
+        data = bytes(image)
+    elif pil is not None and isinstance(image, pil.Image):
+        buffer = io.BytesIO()
+        (image if image.mode in PNG_MODES else image.convert("RGBA")).save(buffer, format="PNG")
+        data = buffer.getvalue()
+    else:
+        raise TypeError(
+            f"show() takes a path, bytes, an image from `await read(path)`, or a PIL image, not {type(image).__name__}"
+        )
+    if len(data) > MAX_SHOW_BYTES:
+        raise ValueError(f"show() takes images up to {MAX_SHOW_BYTES // (1024 * 1024)} MB")
+    return base64.b64encode(data).decode("ascii")
+
+
 def build(host: Host) -> dict[str, Any]:
     """The helpers injected into a kernel's namespace, by name."""
 
@@ -186,7 +221,14 @@ def build(host: Host) -> dict[str, Any]:
         """Stop the child and its children, and delete their worktrees (an unmerged write branch is kept)."""
         return await _agents(host, "remove", {"name": name})
 
+    def show(image: Any) -> None:
+        """Show the model `image` with this cell's result, so it sees the image next turn: a path, bytes, the value
+        `await read(path)` returns for an image, or a PIL image. Makora shrinks it to the model's limits, keeps at most
+        4 per cell, and writes a line to the cell's output saying what was sent, or why not."""
+        host.call_sync("show", {"data": _image_data(image)})
+
     return {
+        "show": show,
         "spawn": spawn,
         "collect": collect,
         "send": send,

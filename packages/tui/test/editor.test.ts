@@ -4428,4 +4428,48 @@ describe("Editor component", () => {
 			assert.strictEqual(submitted, pastedText);
 		});
 	});
+
+	describe("Atomic tokens", () => {
+		function editorWith(text: string, tokens: readonly string[]): Editor {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.atomicTokens = tokens;
+			editor.insertTextAtCursor(text);
+			return editor;
+		}
+
+		it("deletes a token with one backspace and one forward delete", () => {
+			const editor = editorWith("A[image #1]B[image #2]", ["[image #1]", "[image #2]"]);
+			editor.handleInput("\x7f");
+			assert.strictEqual(editor.getText(), "A[image #1]B");
+			editor.handleInput("\x01"); // Ctrl+A
+			editor.handleInput("\x1b[C");
+			editor.handleInput("\x1b[3~");
+			assert.strictEqual(editor.getText(), "AB");
+		});
+
+		it("moves over a token with one arrow press and one word movement", () => {
+			const editor = editorWith("see [image #1] here", ["[image #1]"]);
+			editor.handleInput("\x01");
+			editor.handleInput("\x1b[1;5C"); // past "see"
+			editor.handleInput("\x1b[1;5C"); // past the space and the token
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 4 + "[image #1]".length });
+			editor.handleInput("\x1b[D");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 4 });
+		});
+
+		it("leaves text that is not one of its tokens as characters", () => {
+			const editor = editorWith("[image #3]", ["[image #1]"]);
+			editor.handleInput("\x7f");
+			assert.strictEqual(editor.getText(), "[image #3");
+		});
+
+		it("does not treat the space inside a token as a break opportunity", () => {
+			const editor = editorWith("[image #1]abcdefghij", ["[image #1]"]);
+			const lines = editor.render(15).map((line) => stripVTControlCharacters(line).trimEnd());
+			assert.ok(
+				lines.some((line) => line.startsWith("[image #1]abcd")),
+				lines.join("\n"),
+			);
+		});
+	});
 });

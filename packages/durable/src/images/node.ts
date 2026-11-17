@@ -106,8 +106,9 @@ class PhotonThread {
 		this.#idle = undefined;
 		// A pending image keeps the process alive, as one prepared on the calling thread would.
 		this.#worker.ref();
-		// A copy, transferred: the caller keeps its bytes.
-		const copy = bytes.slice();
+		// A copy, transferred: the caller keeps its bytes. `new Uint8Array` copies a Node `Buffer` too, whose `slice()` is
+		// a view that the transfer would detach.
+		const copy = new Uint8Array(bytes);
 		this.#worker.postMessage({ id, bytes: copy, mimeType, limits } satisfies PrepareRequest, [copy.buffer]);
 		return request.promise;
 	}

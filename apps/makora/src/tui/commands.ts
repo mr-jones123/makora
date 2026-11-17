@@ -8,10 +8,11 @@ import {
 	type AuthInteraction,
 	type AuthPrompt,
 	getSupportedThinkingLevels,
+	type ImageContent,
 	type Model,
 } from "@earendil-works/pi-ai";
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
-import type { ConversationId, ModelRef } from "@earendil-works/pi-durable";
+import type { ConversationId, ModelRef, UserInput } from "@earendil-works/pi-durable";
 import type { SelectItem, SlashCommand } from "@earendil-works/pi-tui";
 import type { MakoraApp } from "../app.ts";
 import { loginAccount } from "../auth/login.ts";
@@ -47,12 +48,12 @@ export interface CommandHost {
 	notice(message: string): void;
 	/** Close the open session and open `meta` (a new one when undefined). */
 	switchSession(meta: SessionMeta | undefined): Promise<void>;
-	/** Submit `text` to the active conversation as user input. */
-	submit(text: string): Promise<void>;
+	/** Submit `input` to the active conversation as user input. */
+	submit(input: UserInput): Promise<void>;
 	/** Make conversation `id` of the open session the active one, shown in the main screen. */
 	activate(id: ConversationId): Promise<void>;
-	/** Replace the editor's text. */
-	setEditorText(text: string): void;
+	/** Replace the editor's draft: its text, and the images its tokens `[image #1]`, ... stand for. */
+	setEditorText(text: string, images: readonly ImageContent[]): void;
 	/** Re-read the account label and the feed's derived state. */
 	refreshStatus(): void;
 	/** Show the diff view of the session's directory. */
@@ -470,7 +471,7 @@ async function fork(host: CommandHost): Promise<void> {
 			: `Forked as ${created.record.label} in ${tildify(files.path)}.`,
 	);
 	if (created.notice !== undefined) host.notice(created.notice);
-	host.setEditorText(point.text);
+	host.setEditorText(point.text, point.images);
 }
 
 /** Let the user pick one of `sessions`. */

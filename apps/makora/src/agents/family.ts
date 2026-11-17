@@ -12,6 +12,7 @@ import {
 	type SubmissionId,
 	type Tx,
 	UsageDoc,
+	type UserInput,
 } from "@earendil-works/pi-durable";
 import { totalCost } from "../usage.ts";
 import {
@@ -86,7 +87,7 @@ export type InputTarget = {
  * the user types), its request ID, and who sends it: the user, or an agent by how it relates to the receiver.
  */
 export type AgentInput = {
-	readonly content: string;
+	readonly content: UserInput;
 	readonly entry?: InputEntry;
 	readonly requestId: string;
 	readonly from: "user" | Relationship;

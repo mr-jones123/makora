@@ -10,9 +10,10 @@ Top to bottom:
 | Row | Shows |
 | --- | --- |
 | Top bar | `makora` · on a fork or subagent, `viewing <name> · <mode> · <branch> · esc back to main` · session title (the first prompt) · the active conversation's directory; right: session cost and time since the session started |
-| Transcript | Your messages (`›`), the model's answers as markdown, thinking as one muted line (`∴ thinking · …`), tool calls, subagent results and messages (`↩`), notices |
+| Transcript | Your messages (`›`, an attached image as a muted `[image #1 · png · 1280×800]`), the model's answers as markdown, thinking as one muted line (`∴ thinking · …`), tool calls, subagent results and messages (`↩`), notices |
 | Activity row | `◆ N running` (green when above 0) · `◌ N waiting` · `N worktrees` (the session's fork and subagent worktrees, removed ones not counted) · the active conversation's Python kernel, once a cell started one (`py running 3 vars @ cell 7 45 MB`, `py dead (exit 1)` as a warning; see [repl.md](repl.md#cells-in-the-tui)) · compaction state |
 | Status row | the active conversation's model · thinking level · directory (git branch, or a short commit in a fork's worktree) · a 20-cell context gauge with `NN% of <window>`; right: the account label |
+| Attachments | Only while the draft has images: `image #1 · png · 1280×800 · 210 KB` for each ([Images](#images)) |
 | Editor | A rounded box; `/` opens command autocomplete |
 | Hint row | The main keys, read from the key bindings so remaps show (`esc back to main` instead of `esc interrupt` on a fork or subagent); shows `press ctrl+c again to exit` after a first Ctrl+C |
 
@@ -35,6 +36,36 @@ line; those lines are not saved in the session.
 A subagent's result and a message from another agent show as a `↩` row: a title line (`↩ writer · done`, `↩ message
 from reviewer-b (sibling)`) and the first 6 lines of the text, with `… N more lines` after them. Ctrl+O shows all of it
 ([subagents.md](subagents.md#results)).
+
+### Images
+
+Ctrl+V pastes from the system clipboard, in this order:
+
+1. Files copied in Finder are inserted as their paths, one per line.
+2. An image is attached. It shows in the editor as a token, `[image #1]`, which moves and deletes as one character,
+   and the line above the editor lists it: `image #1 · png · 1280×800 · 210 KB`. Images larger than 2000×2000 pixels
+   or 4.5 MB (the model's own limits when it declares them) are scaled down and re-encoded first, by Photon in a worker
+   thread, so pasting a large photo does not freeze the screen.
+3. Otherwise the clipboard's text is inserted, as the terminal's own paste does (a long text becomes `[paste #1 …]`).
+
+Dragging a file into the terminal pastes its path as text; it is not attached, since the model can read files.
+
+Deleting a token leaves its image out, and undo brings both back. Ctrl+C clears the text and the images together. On
+Enter the message goes out as its text, with the tokens numbered `[image #1]`, `[image #2]`, … in order, followed by
+the images in that order, so the model can tell which is which. The transcript shows each token as
+`[image #1 · png · 1280×800]`, muted. The images are saved in the session and show the same after `--continue`.
+
+Makora refuses to send, keeps the draft and shows a notice when:
+
+- The model takes no images: `faux-2 cannot see images; switch with /model or remove [image #1]`.
+- The message has more than 4 images.
+- An image is over the byte limit of the model in use (possible after switching to a model with a smaller one).
+
+Ctrl+V works in the main editor, also when the active conversation is a fork or a subagent opened from the
+dashboard; typing an image into a busy conversation steers it as text does. `/fork` puts the message back in the
+editor with its images attached. Not in dialogs. Print mode takes text only. The clipboard is read through pi-tui's
+native helper, which covers macOS, Windows and Linux under X11; under Wayland alone Ctrl+V says it cannot read the
+clipboard. Images are not drawn inline in the transcript.
 
 ### Scrolling
 
@@ -92,6 +123,7 @@ Details of every column and key: [subagents.md](subagents.md#the-dashboard). For
 | Ctrl+A | Agents dashboard | `app.agents` |
 | Ctrl+L | Model picker | `app.model.select` |
 | Ctrl+G | Diff view ([diff.md](diff.md)) | `app.diff` |
+| Ctrl+V (also Alt+V on Windows) | Paste copied files as paths, an image as an attachment, or text ([Images](#images)) | `app.clipboard.pasteImage` |
 | d (dashboard) | Diff of the selected agent's work against its base commit | `app.agents.diff` |
 | m (dashboard) | Merge the selected write subagent | `app.agents.merge` |
 | s (dashboard) | Stop the selected running or queued subagent | `app.agents.stop` |
@@ -115,7 +147,7 @@ Every binding can be remapped in `~/.makora/keybindings.json` ([reference/config
 | `/pstack` | Choose pstack's code and judge models, their thinking budget, and where each pstack role runs; `/skill:setup-pstack` opens it too ([skills.md](skills.md#pstack-model-roles)) |
 | `/new` | Start a new session in this directory |
 | `/resume` | Resume another session |
-| `/fork` | Fork the active conversation before an earlier message, with that point's variables and files ([sessions.md](sessions.md#forks)) |
+| `/fork` | Fork the active conversation before an earlier message, with that point's variables and files; the message, with its images, goes back in the editor ([sessions.md](sessions.md#forks)) |
 | `/quiz [rev-range \| all]` | Have the agent write a 10-question quiz on what this session's commits built and decided (or the range's, or the whole project's), saved as a self-scoring HTML page and opened in the browser ([quiz.md](quiz.md)) |
 | `/compact [instructions]` | Compact the context now |
 | `/diff` | Open the diff view of the active conversation's directory: changes, staging, commit history, ask about a line ([diff.md](diff.md)) |

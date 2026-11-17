@@ -1,8 +1,11 @@
-// The process-wide parts of makora shared by every session it opens: home paths, accounts, models, and settings.
+// The process-wide parts of makora shared by every session it opens: home paths, accounts, models, settings, and the
+// image processor.
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MutableModels } from "@earendil-works/pi-ai/models";
 import type { ModelRef } from "@earendil-works/pi-durable";
+import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
+import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import type { WorktreeRoots } from "./agents/worktree.ts";
 import { openAuthStore } from "./auth/store.ts";
 import type { AuthStore } from "./auth/types.ts";
@@ -16,6 +19,8 @@ export interface MakoraApp {
 	readonly auth: AuthStore;
 	readonly models: MutableModels;
 	readonly settings: SettingsFile;
+	/** Prepares images for models (`read`, pasted images, `show()` in cells) with Photon in a worker thread. */
+	readonly images: ImageProcessor;
 	readonly fake: boolean;
 }
 
@@ -23,7 +28,16 @@ export interface MakoraApp {
 export function openApp(home: string, fake: boolean): MakoraApp {
 	const paths = homePaths(home);
 	const auth = openAuthStore(paths.auth);
-	return { paths, auth, models: createMakoraModels(auth, fake), settings: openSettings(paths.settings), fake };
+	// Its worker starts at the first image and exits after 30 s without one.
+	const photon = createNodePhotonImages();
+	return {
+		paths,
+		auth,
+		models: createMakoraModels(auth, fake),
+		settings: openSettings(paths.settings),
+		images: { prepare: async (bytes, mimeType, limits) => (await photon).prepare(bytes, mimeType, limits) },
+		fake,
+	};
 }
 
 /** Where subagent worktrees go, read from the settings at each call: the temp folder and `<home>/worktrees` by default. */

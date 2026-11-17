@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `Editor.atomicTokens`: text such as an attachment token `[image #1]` that cursor movement, deletion, and wrapping treat as one character, as they treat paste markers. `wordWrapLine()` takes an optional `isAtomic` predicate for the merged segments it is given
+
 ### Fixed
 
 - Fixed fullscreen Kitty images disappearing after a full redraw such as a window resize. Clearing the screen made Kitty free the cached image data that the redraw then tried to reuse ([#12010](https://github.com/earendil-works/pi/issues/12010))

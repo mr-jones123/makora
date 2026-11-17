@@ -1,5 +1,6 @@
 // The Durable state of subagents: what a conversation keeps about its children, a child about itself, a waiting call
 // about what it waits for, the session's running slots and message log, and the signals that wake parked work.
+import type { JsonRepresentation } from "@earendil-works/chord/json";
 import {
 	type ConversationId,
 	defineDoc,
@@ -7,12 +8,20 @@ import {
 	defineSignal,
 	type InputEntry,
 	type TaskId,
+	type UserInput,
 } from "@earendil-works/pi-durable";
 import { lit, obj, oneOf, str, union } from "@earendil-works/pi-schema";
 import type { AgentMessageLog, AgentsDocument, StopReason } from "./types.ts";
 
-/** An input that woke a finished child, kept until its anchor has a running slot and submits it. */
-type HeldInput = { readonly content: string; readonly entry?: InputEntry; readonly requestId: string };
+/**
+ * An input that woke a finished child, kept until its anchor has a running slot and submits it. Its content, text or
+ * text and images, in the JSON form a document holds.
+ */
+type HeldInput = {
+	readonly content: JsonRepresentation<UserInput>;
+	readonly entry?: InputEntry;
+	readonly requestId: string;
+};
 
 /** What the runtime keeps per child next to its record: the anchor task driving it and the round it watches. */
 export type AgentRuntime = {

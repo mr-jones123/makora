@@ -24,7 +24,8 @@ Every cell starts with these names defined. The async ones need `await`; top-lev
 | `await edit(path, old, new)` | The same for one replacement |
 | `await bash(command, timeout=None)` | Runs a shell command; `timeout` in seconds. Returns a `BashResult` with `.output`, `.exit_code`, `.truncated` and `.full_output_path`. `print()` shows the output, and `[exit code N]` when it is not 0 |
 | `await llm(prompt, schema=None, model=None, timeout=300)` | One model call without tools, with the conversation's model unless `model` (`"provider/modelId"`) says otherwise. Returns the text. With `schema` (a JSON Schema, or a pydantic model class), returns the parsed JSON value after checking it against the schema |
-| `ctx.input()` | The latest user message's text |
+| `show(image)` | Shows the model an image with the cell's result: a path, bytes, the value `await read("x.png")` returns, or a PIL image. See [Showing the model an image](#showing-the-model-an-image) |
+| `ctx.input()` | The latest user message's text (an attached image as its token, `[image #1]`) |
 | `await ctx.transcript(limit=20)` | The newest `limit` transcript messages, oldest first, as dicts with `id`, `kind`, `role` and `text`. Tool results add `toolName` and `isError`, and assistant messages add `toolCalls` |
 | `await spawn(...)`, `collect`, `send`, `merge`, `stop`, `remove`, `agents.list()`, `agents.get(name)`, `agents.recent(name)` | Subagents: see [subagents.md](subagents.md#start-one-from-a-cell) |
 | `await quiz.publish(bank)` | The `session-quiz` skill's hand-off: checks the question bank, saves the quiz page and opens it; returns `{path, range, commits, opened}`. See [quiz.md](quiz.md) |
@@ -43,6 +44,32 @@ print(result.exit_code, result.output[-2000:])
 What the model sees of a cell is its printed output (the last 16,000 characters) and the `repr` of the cell's final
 expression, shown as `Out: ...`. A cell stops after 600 s unless the model passes another `timeout`. Esc interrupts
 the running cell. `sys.exit()` ends the cell, not the REPL.
+
+## Showing the model an image
+
+`show(image)` attaches an image to the cell's result, so the model sees it on its next turn:
+
+```python
+show("screenshot.png")                    # a path
+show(png_bytes)                           # bytes
+show(await read("diagram.png"))           # what read() returns for an image
+from PIL import Image; show(Image.open("photo.jpg").rotate(90))   # a PIL image, when Pillow is installed
+```
+
+`show` is synchronous and returns `None`. Each call writes one line to the cell's output, which the model and the
+transcript both see:
+
+| Line | Means |
+| --- | --- |
+| `image · png · 800×600` | Attached as it is |
+| `image · jpeg · 2000×1500 (resized from 4000×3000)` | Scaled down and re-encoded to fit the model's limits (2000×2000 pixels and 4.5 MB, unless the model declares others) |
+| `image not shown: a cell shows at most 4 images` | The fifth and later images of a cell |
+| `image not shown: faux-2 cannot see images` | The conversation's model takes no images |
+| `image not shown: it is not a PNG, JPEG, GIF, WebP or BMP image` | The bytes are not an image makora can read |
+
+Anything else raises: `TypeError` for an argument of another type, `ValueError` for more than 50 MB. The images are
+saved with the cell's result like any tool result, so they survive a crash and a resume. `ctx.transcript()` gives
+messages' text only, never the images' bytes. Pasting images into a message is in [tui.md](tui.md#images).
 
 ## Cells in the TUI
 

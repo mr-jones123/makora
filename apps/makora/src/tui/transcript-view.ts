@@ -52,7 +52,7 @@ export class TranscriptView implements Component {
 			previous = row.kind;
 			switch (row.kind) {
 				case "user":
-					lines.push(...prefixed(theme.accent("› "), "  ", row.text, width, theme.text));
+					lines.push(...prefixed(theme.accent("› "), "  ", userText(row.text, row.images), width, (line) => line));
 					break;
 				case "assistant": {
 					const markdown = this.#markdown.get(row.key) ?? new Markdown("", 0, 0, markdownTheme);
@@ -102,6 +102,32 @@ const AGENT_LINES = 6;
 function prefixed(first: string, rest: string, text: string, width: number, paint: Paint): string[] {
 	const inner = Math.max(1, width - visibleWidth(first));
 	return wrapTextWithAnsi(text, inner).map((line, index) => `${index === 0 ? first : rest}${paint(line)}`);
+}
+
+const IMAGE_TOKEN = /\[image #(\d+)\]/g;
+
+/**
+ * A user message's text, with each `[image #N]` naming one of its images muted as `[image #N · png · 1280×800]`;
+ * images no token names follow on a line of their own.
+ */
+function userText(text: string, images: readonly string[]): string {
+	const named = new Set<number>();
+	const label = (n: number) => theme.muted(`[image #${n} · ${images[n - 1]}]`);
+	// Painted line by line, so each wrapped line starts in its color.
+	const painted = text.split("\n").map((line) => {
+		let out = "";
+		let from = 0;
+		for (const match of line.matchAll(IMAGE_TOKEN)) {
+			const n = Number(match[1]);
+			if (images[n - 1] === undefined) continue;
+			named.add(n);
+			out += theme.text(line.slice(from, match.index)) + label(n);
+			from = match.index + match[0].length;
+		}
+		return out + theme.text(line.slice(from));
+	});
+	const unnamed = images.flatMap((_, index) => (named.has(index + 1) ? [] : [label(index + 1)]));
+	return [...painted, ...(unnamed.length === 0 ? [] : [unnamed.join(" ")])].join("\n");
 }
 
 // A python cell shows its code where other calls show their arguments, and the calls it made after its output.

@@ -15,6 +15,7 @@ export {
 	type PowerShellToolOptions,
 } from "./bash.ts";
 export { createEditTool, type EditToolDetails, type EditToolInput } from "./edit.ts";
+export { detectSupportedImageMimeType, imageDimensions } from "./image.ts";
 export {
 	DEFAULT_IMAGE_LIMITS,
 	type ImageLimits,

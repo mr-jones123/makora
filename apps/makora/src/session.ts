@@ -14,10 +14,11 @@ import {
 	type Report,
 	type Storage,
 	type Submission,
+	type UserInput,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { createCodingTools } from "@earendil-works/pi-durable/tools";
 import { type Agents, createAgents } from "./agents/extension.ts";
 import { admitInput, identityOf } from "./agents/family.ts";
 import type { SetupPolicy, SetupRequest } from "./agents/worktree.ts";
@@ -64,11 +65,12 @@ export interface MakoraSession {
 	/** Call `listener` with each later notice; returns the unsubscribe. */
 	onNotice(listener: (notice: SessionNotice) => void): () => void;
 	/**
-	 * Submit user input to `conversation`; the session's first input becomes its title. Returns the input's submission. A
-	 * running subagent takes it as a steer. A finished one is woken by it: it queues for a running slot, and its anchor
-	 * submits the input once it has one and records the run, so this returns undefined. A queued or removed one refuses it.
+	 * Submit user input (text, or text and images) to `conversation`; the session's first input becomes its title.
+	 * Returns the input's submission. A running subagent takes it as a steer. A finished one is woken by it: it queues
+	 * for a running slot, and its anchor submits the input once it has one and records the run, so this returns
+	 * undefined. A queued or removed one refuses it.
 	 */
-	submit(conversation: Conversation, text: string, context: Context): Promise<Submission | undefined>;
+	submit(conversation: Conversation, input: UserInput, context: Context): Promise<Submission | undefined>;
 	/** Switch `conversation`'s model; the root's is recorded in the meta. */
 	setModel(conversation: Conversation, model: ModelRef, context: Context): Promise<void>;
 	/**
@@ -149,9 +151,14 @@ async function open(
 	try {
 		// Under the lock, so the kernels it kills can only be ones a crashed holder left.
 		kernels = new KernelManager(app.paths.home, dir === undefined ? undefined : join(dir, "kernels"));
-		repl = createRepl({ kernels, snapshots: snapshotPolicy(app, meta, dir), defaultCwd: meta.cwd });
+		repl = createRepl({
+			kernels,
+			snapshots: snapshotPolicy(app, meta, dir),
+			defaultCwd: meta.cwd,
+			images: app.images,
+		});
 		const registry = createRegistry();
-		registry.install(CodingTools);
+		registry.install(createCodingTools({ images: app.images }));
 		registry.install(makoraExtension(app.paths, () => app.settings.pstack));
 		registry.install(repl.extension);
 		agents = createAgents({
@@ -248,11 +255,11 @@ async function open(
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
-		async submit(conversation, text, submitContext) {
+		async submit(conversation, input, submitContext) {
 			const self = await identityOf(harness, conversation.id, submitContext);
 			let submission: Submission | undefined;
 			if (self === undefined)
-				submission = await conversation.submit({ type: "input", content: text }, submitContext);
+				submission = await conversation.submit({ type: "input", content: input }, submitContext);
 			else {
 				// A subagent's input is admitted through its anchor, so the run it starts is watched and recorded.
 				const id = await harness.commit(
@@ -260,7 +267,7 @@ async function open(
 						admitInput(
 							tx,
 							{ handle: conversation, self },
-							{ content: text, requestId: `user-input:${uuidv7()}`, from: "user" },
+							{ content: input, requestId: `user-input:${uuidv7()}`, from: "user" },
 							"followUp",
 						),
 					submitContext,
@@ -269,6 +276,10 @@ async function open(
 				if (id !== undefined && submission === undefined)
 					throw new Error(`The input to ${self.name} was not admitted`);
 			}
+			const text =
+				typeof input === "string"
+					? input
+					: input.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 			const title = current.title ?? (text.trim().split("\n")[0]?.slice(0, TITLE_LENGTH) || undefined);
 			current = update(current, title === undefined ? {} : { title });
 			return submission;

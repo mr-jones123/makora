@@ -36,8 +36,11 @@ flowchart TB
 | `makora-repl` extension | `src/repl/extension.ts` | Registers `python` and `llm` |
 
 The model is offered `python` and the subagents' `wait_agents` (`modelTools: [python, wait_agents]` in
-`src/session.ts`). Opening a session made before them reconfigures its root conversation the same way. The registry still installs Durable's `CodingTools`, so `read`,
-`write`, `edit` and `bash` run when a cell calls them, as nested Durable calls, each recorded in its own task.
+`src/session.ts`). Opening a session made before them reconfigures its root conversation the same way. The registry still installs Durable's coding tools, so `read`,
+`write`, `edit` and `bash` run when a cell calls them, as nested Durable calls, each recorded in its own task. They
+are built with `createCodingTools({ images })`, where `images` is the app's Photon processor
+(`createNodePhotonImages()`, in a worker thread): `read` of an image returns it turned upright and scaled to the
+model's limits, the same processor `show()` and pasted images use.
 Durable itself is unchanged.
 
 `python` has `callers: ["model"]`, so no tool can call it. Its `executionMode` is `"sequential"`. Durable then runs the
@@ -87,7 +90,9 @@ A cell may use top-level `await`. When its last statement is an expression, that
 ### The protocol
 
 One JSON object per line. `src/kernel/protocol.ts` and `python/makora_rlm/protocol.py` define the same shapes; change
-both together. `KERNEL_PROTOCOL_VERSION` is 1, and makora refuses a kernel whose `ready` reports another version.
+both together. `KERNEL_PROTOCOL_VERSION` is 1, and makora refuses a kernel whose `ready` reports another version. The
+`show` host method was added without a new version: it only adds a request the kernel may send, and a kernel always
+runs the `makora_rlm` of the makora that started it.
 
 | From | Message | Purpose |
 | --- | --- | --- |
@@ -99,7 +104,7 @@ both together. `KERNEL_PROTOCOL_VERSION` is 1, and makora refuses a kernel whose
 | makora | `shutdown` | Exit |
 | kernel | `ready { protocol, pid, python, dill }` | First line, once requests are accepted; makora waits 30 s for it |
 | kernel | `stream { id, stream, text }` | Cell output, batched every 50 ms and flushed before each reply |
-| kernel | `host_request { requestId, cellId, method, params }` | A helper's call into makora: `tool`, `llm`, `ctx`, `agents` or `quiz` |
+| kernel | `host_request { requestId, cellId, method, params }` | A helper's call into makora: `tool`, `llm`, `ctx`, `agents`, `quiz` or `show` |
 | kernel | `result { id, status, value?, error?, durationMs, maxRssBytes }` | How a cell ended: `ok`, `error` or `interrupted` |
 | kernel | `snapshot_result { id, manifest }` | The snapshot's manifest |
 | kernel | `restore_result { id, restored, failed }` | Names restored, and names that failed with the reason |
@@ -125,12 +130,20 @@ The helpers in a cell send `host_request` messages, and the `python` tool answer
 | `ctx` | `latestInput` or `recentEntries` in `history.ts`, read from the conversation's committed entries |
 | `agents` | One nested call of a subagent tool, keyed the same way: `spawn`, `collect`, `send`, `merge`, `stop` or `remove`, or the `agents` tool for `list`, `get` and `recent` ([subagents.md](subagents.md#tools)). The result is the tool's structured output |
 | `quiz` | `await quiz.publish(bank)`: one nested call of the `quiz_publish` tool, keyed the same way, which checks the bank, saves the quiz page and opens it ([quiz.md](quiz.md)). The result is `{ path, range, commits, opened }` |
+| `show` | `show(image)` with `{ data }`, the image's base64. The python tool's `CellOutput` sniffs the format (`detectSupportedImageMimeType`), prepares it with Photon to the conversation model's limits (`imageModel` in `src/images.ts`), keeps at most 4 per cell, and appends a line to the cell's output: `image · png · 800×600`, or `image not shown: <why>`. The reply carries no value. The result's `output` is the text, then the images |
 
 `await read(path)` with neither `offset` nor `limit` returns the whole file. Durable's `read` stops at its line and
 byte limits and says so only in a diagnostic, so the python tool follows the continuation offsets, one nested `read`
 call per page, keyed `<requestId>@<offset>`. A single line over read's byte limit (51,200 bytes) cannot be continued,
 and the call raises `HostError` with `<path>: line N is over read's 51200-byte limit`. With `offset` or `limit`, it
 returns one page.
+
+`show(image)` turns its argument into bytes in Python: a path is read (at most 50 MB), bytes are taken as they are, the
+`{type: "image", data, mimeType}` dict `read` returns passes its base64 on, and an instance of `PIL.Image.Image`, once a
+cell imported PIL, is saved as PNG. It blocks on its reply like `ctx.input()`, so it also works outside `async` code.
+The images are part of the result Durable commits, so they replay and persist like any tool result; the snapshot does
+not hold them. `ctx.transcript()` and `ctx.input()` read text blocks only (`messageText`), so no base64 reaches a cell
+from the history.
 
 A failed nested call raises `HostError` in the cell. The exception is a call that returned a value for programs:
 `bash` with a non-zero exit returns its result, and `exit_code` holds the code. The kernel reads replies on its own

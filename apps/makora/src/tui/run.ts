@@ -3,7 +3,8 @@
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ConversationId, ModelRef } from "@earendil-works/pi-durable";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import type { ConversationId, ModelRef, UserInput } from "@earendil-works/pi-durable";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -23,6 +24,7 @@ import { fetchPlanUsage } from "../auth/usage.ts";
 import type { SessionChoice } from "../cli-args.ts";
 import { ensureForkFiles } from "../fork.ts";
 import { filesSince, openRepo } from "../git/repo.ts";
+import { imageModel, prepareImage } from "../images.ts";
 import { FAKE_MODEL } from "../models.ts";
 import { tildify } from "../paths.ts";
 import { gitBranch } from "../project.ts";
@@ -32,7 +34,9 @@ import { discoverSkills, type Skill } from "../skills.ts";
 import { type AccountLabel, accountLabel } from "./account-label.ts";
 import { type ActionHost, type ActionOutcome, diffTarget, mergeRow, removeRow, stopRow } from "./agent-actions.ts";
 import { type AgentsSnapshot, AgentsView, countWorktrees, loadAgents } from "./agents.ts";
+import { type Attachment, Attachments, attachmentLine, composeInput } from "./attachments.ts";
 import { dockLine, hintLine, Line, rule, statusLine, topBar } from "./bars.ts";
+import { readPaste, spacedPaths, systemClipboard } from "./clipboard.ts";
 import { type CommandHost, pickSession, runCommand, slashCommands } from "./commands.ts";
 import { type AgentKind, type DashboardRow, dashboardRows, whereOf } from "./dashboard.ts";
 import { Dialogs } from "./dialogs.ts";
@@ -62,7 +66,10 @@ export async function runTui(app: MakoraApp, options: TuiOptions): Promise<numbe
 }
 
 const TICK_MS = 125;
-/** Rows of the main screen around the transcript: top bar, two rules, dock, status, the editor's three, hints. */
+/**
+ * Rows of the main screen around the transcript: top bar, two rules, dock, status, the editor's three, hints; one more
+ * while the draft has attachments.
+ */
 const MAIN_CHROME_ROWS = 9;
 const PLAN_USAGE_MS = 5 * 60_000;
 /** How long a first Ctrl+C on an idle, empty editor waits for the second one that exits. */
@@ -80,6 +87,7 @@ const APP_KEYS: readonly (readonly [MakoraKeybinding, KeyAction])[] = [
 	["app.agents", (tui) => tui.openAgents()],
 	["app.model.select", (tui) => tui.command("/model")],
 	["app.diff", (tui) => tui.openDiff()],
+	["app.clipboard.pasteImage", (tui) => tui.paste()],
 ];
 
 class MakoraTui implements CommandHost {
@@ -97,6 +105,8 @@ class MakoraTui implements CommandHost {
 	readonly #skills: Skill[];
 	readonly #exit = Promise.withResolvers<number>();
 	#ui: UiState = INITIAL_UI;
+	/** The images attached to the editor's draft. */
+	readonly #attachments = new Attachments();
 	/** The active conversation's feed. */
 	#feed: SessionFeed | undefined;
 	/** Feeds of the open session's conversations shown so far, kept so switching back keeps their local lines. */
@@ -173,6 +183,10 @@ class MakoraTui implements CommandHost {
 			rule(),
 			new Line(() => this.#dock()),
 			new Line((width) => this.#status(width)),
+			{
+				component: new Line(() => theme.muted(attachmentLine(this.#attached()))),
+				visible: () => this.#attached().length > 0,
+			},
 			{ component: this.#editor, shrink: 1, minSize: 3 },
 			new Line(() => this.#mainHint()),
 		]);
@@ -325,10 +339,10 @@ class MakoraTui implements CommandHost {
 		return answer;
 	}
 
-	async submit(text: string): Promise<void> {
+	async submit(input: UserInput): Promise<void> {
 		this.#scroll.scrollToEnd();
 		const feed = this.feed();
-		await feed.session.submit(feed.conversation, text, BACKGROUND_CONTEXT);
+		await feed.session.submit(feed.conversation, input, BACKGROUND_CONTEXT);
 	}
 
 	async activate(id: ConversationId): Promise<void> {
@@ -345,9 +359,21 @@ class MakoraTui implements CommandHost {
 		this.#show(feed);
 	}
 
-	setEditorText(text: string): void {
-		this.#editor.setText(text);
+	setEditorText(text: string, images: readonly ImageContent[]): void {
+		this.#setDraft(text, images);
 		this.#tui.requestRender();
+	}
+
+	/** Replace the draft: its text, and the images its tokens `[image #1]`, `[image #2]`, ... stand for. */
+	#setDraft(text: string, images: readonly ImageContent[]): void {
+		this.#attachments.reset(images);
+		this.#editor.atomicTokens = this.#attachments.tokens();
+		this.#editor.setText(text);
+	}
+
+	/** The draft's images whose tokens are in the editor's text. */
+	#attached(): Attachment[] {
+		return this.#attachments.inText(this.#editor.getText());
 	}
 
 	refreshStatus(): void {
@@ -394,11 +420,53 @@ class MakoraTui implements CommandHost {
 	cancel(): boolean {
 		if (this.interrupt()) return true;
 		// setText does not schedule a frame by itself; without one the cleared text stays on screen.
-		if (this.#editor.getText() !== "") this.#editor.setText("");
+		if (this.#editor.getText() !== "") this.#setDraft("", []);
 		else if (Date.now() < this.#exitArmedUntil) this.exit();
 		else this.#exitArmedUntil = Date.now() + EXIT_CONFIRM_MS;
 		this.#tui.requestRender();
 		return true;
+	}
+
+	/** Ctrl+V: copied files as their paths, a clipboard image as an attachment, else the clipboard's text. */
+	paste(): boolean {
+		void this.#paste().catch((error: unknown) => this.notice(`Could not paste: ${describeError(error)}`));
+		return true;
+	}
+
+	async #paste(): Promise<void> {
+		const clipboard = systemClipboard();
+		if (clipboard === undefined) {
+			this.notice("makora cannot read the clipboard here; paste text with the terminal's own paste key.");
+			return;
+		}
+		const paste = await readPaste(clipboard);
+		switch (paste.kind) {
+			case "files": {
+				const { line, col } = this.#editor.getCursor();
+				const text = this.#editor.getLines()[line] ?? "";
+				this.#editor.insertTextAtCursor(spacedPaths(paste.paths, text.slice(0, col), text.slice(col)));
+				break;
+			}
+			case "image": {
+				const model = imageModel(this.#feed?.state.model, this.app.models);
+				const prepared = await prepareImage(paste.bytes, model.limits, this.app.images);
+				if (prepared.kind === "refused") {
+					this.notice(`The clipboard image was not attached: ${prepared.reason}.`);
+					return;
+				}
+				const token = this.#attachments.add(prepared.image);
+				this.#editor.atomicTokens = this.#attachments.tokens();
+				this.#editor.insertTextAtCursor(token);
+				break;
+			}
+			case "text":
+				// As a bracketed paste, so a long text becomes a `[paste #N]` marker as the terminal's own paste does.
+				this.#editor.handleInput(`\x1b[200~${paste.text}\x1b[201~`);
+				break;
+			case "empty":
+				return;
+		}
+		this.#tui.requestRender();
 	}
 
 	openAgents(): boolean {
@@ -452,9 +520,19 @@ class MakoraTui implements CommandHost {
 
 	#submitted(text: string): void {
 		if (text.length === 0) return;
+		const draft = text.startsWith("/")
+			? undefined
+			: composeInput(text, this.#attachments.inText(text), imageModel(this.#feed?.state.model, this.app.models));
+		if (draft?.kind === "refused") {
+			// Enter emptied the editor; the draft goes back, its attachments still there.
+			this.#editor.setText(text);
+			this.notice(draft.notice);
+			return;
+		}
 		this.#editor.addToHistory(text);
-		if (text.startsWith("/")) this.command(text);
-		else void this.submit(text).catch((error: unknown) => this.notice(String(error)));
+		this.#setDraft("", []);
+		if (draft === undefined) this.command(text);
+		else void this.submit(draft.content).catch((error: unknown) => this.notice(String(error)));
 	}
 
 	async #initialSession(): Promise<SessionMeta | undefined> {
@@ -838,6 +916,7 @@ class MakoraTui implements CommandHost {
 			"app.agents",
 			"app.diff",
 			"app.model.select",
+			"app.clipboard.pasteImage",
 		];
 		return hintLine(ids.map((id) => [keys.getKeys(id).slice(0, 1), MAKORA_KEYBINDINGS[id].description] as const));
 	}
@@ -857,7 +936,7 @@ class MakoraTui implements CommandHost {
 	/** The splash that replaces the empty transcript: the full one when it fits, else the compact wheel, else none. */
 	#splashFor(view: { readonly height: number }): SplashVariant["kind"] | undefined {
 		if ((this.#feed?.state.rows.length ?? 0) > 0) return undefined;
-		const rows = view.height - MAIN_CHROME_ROWS;
+		const rows = view.height - MAIN_CHROME_ROWS - (this.#attached().length > 0 ? 1 : 0);
 		if (rows >= SPLASH_HEIGHT) return "full";
 		return rows >= COMPACT_SPLASH_HEIGHT ? "compact" : undefined;
 	}

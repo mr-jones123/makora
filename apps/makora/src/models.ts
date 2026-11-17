@@ -1,5 +1,6 @@
 // Makora's model collection: every built-in provider, plus in fake mode (`--fake`, `MAKORA_FAKE=1`) a scripted faux
-// provider for demos and tests that drives the Python REPL by keywords in the prompt and answers in markdown.
+// provider for demos and tests that drives the Python REPL by keywords in the prompt and answers in markdown. Its first
+// model sees images and its second does not, so both sides of image input can be tried.
 import {
 	type CredentialStore,
 	calculateCost,
@@ -16,6 +17,7 @@ import {
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import type { ModelRef } from "@earendil-works/pi-durable";
+import { describeImage, formatSize, imageBytes } from "./images.ts";
 
 /** The fake provider's default model. */
 export const FAKE_MODEL: ModelRef = { provider: "faux", modelId: "faux-1" };
@@ -176,6 +178,13 @@ export const FAKE_SCRIPTS: readonly { readonly keyword: string; readonly cells: 
 		],
 	},
 	{ keyword: "file", cells: ['await write("fake.txt", "hi")', 'print(await read("fake.txt"))'] },
+	// Writes an 800×600 PNG with the standard library and shows it to the model.
+	{
+		keyword: "show-image",
+		cells: [
+			'import struct, zlib\nw, h = 800, 600\nrow = b"\\x00" + bytes(i % 256 for i in range(w * 3))\nchunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))\nopen("shown.png", "wb").write(b"\\x89PNG\\r\\n\\x1a\\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(row * h)) + chunk(b"IEND", b""))\nshow("shown.png")',
+		],
+	},
 	{ keyword: "tool", cells: ['print(await bash("echo hello; sleep 2"))'] },
 	{ keyword: "ask", cells: ['print(await llm("say hi"))'] },
 	{ keyword: "python", cells: ["x = 41", "print(x + 1)"] },
@@ -189,6 +198,7 @@ function addFakeProvider(models: MutableModels): void {
 		models: [FAKE_MODEL, SECOND_FAKE_MODEL].map((model, index) => ({
 			id: model.modelId,
 			name: index === 0 ? "Faux" : `Faux ${index + 1}`,
+			input: index === 0 ? ["text", "image"] : ["text"],
 			reasoning: true,
 			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 			contextWindow: 200_000,
@@ -279,17 +289,33 @@ function fakeResponse(messages: readonly Message[]) {
 	const last = results.at(-1);
 	if (last !== undefined) {
 		const output = last.content.flatMap((part) => (part.type === "text" ? [part.text.trim()] : [])).join("\n");
+		const images = last.content.flatMap((part) => (part.type === "image" ? [describeImage(part)] : []));
+		const carried = images.length === 0 ? "" : `It carried ${images.length} image(s): ${images.join("; ")}.\n\n`;
 		return fauxAssistantMessage([
 			fauxThinking("The cells finished; summarizing the last one."),
 			fauxText(
-				`The \`${last.toolName}\` call ${last.isError ? "failed" : "finished"}. Its output:\n\n\`\`\`\n${output}\n\`\`\`\n\nThat is all the fake model does with the REPL.`,
+				`The \`${last.toolName}\` call ${last.isError ? "failed" : "finished"}. Its output:\n\n\`\`\`\n${output}\n\`\`\`\n\n${carried}That is all the fake model does with the REPL.`,
+			),
+		]);
+	}
+	// Reports the images of the prompt, so tests and demos see what reached the model.
+	if (task.includes("images")) {
+		const images =
+			typeof input?.content === "string"
+				? []
+				: (input?.content ?? []).flatMap((part) =>
+						part.type === "image" ? [`${describeImage(part)} · ${formatSize(imageBytes(part))}`] : [],
+					);
+		return fauxAssistantMessage([
+			fauxText(
+				`The last message had ${images.length} image(s)${images.length === 0 ? "" : `: ${images.join("; ")}`}.`,
 			),
 		]);
 	}
 	return fauxAssistantMessage([
 		fauxThinking("Answering from the fake script."),
 		fauxText(
-			`## Fake answer\n\nYou wrote: **${text}**\n\n- This is makora's fake model; no provider was called.\n- Mention ${FAKE_SCRIPTS.map((each) => `\`${each.keyword}\``).join(", ")} in a prompt to run Python cells.`,
+			`## Fake answer\n\nYou wrote: **${text}**\n\n- This is makora's fake model; no provider was called.\n- Mention ${FAKE_SCRIPTS.map((each) => `\`${each.keyword}\``).join(", ")} in a prompt to run Python cells, or \`images\` to hear about the images of the prompt.`,
 		),
 	]);
 }

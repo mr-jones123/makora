@@ -22,6 +22,8 @@
 | `keybindings.ts` | Makora's bindings merged over pi-tui's, plus user overrides |
 | `account-label.ts` | The status row's account label |
 | `rounded-editor.ts` | pi-tui's editor drawn in a rounded box |
+| `clipboard.ts` | What Ctrl+V pastes (`readPaste`: copied files, else an image, else text) from a `ClipboardReader`; `systemClipboard()` reads it through pi-tui's `getNativeClipboard()` |
+| `attachments.ts` | The draft's images (`Attachments`: token numbers, the images whose tokens are in the text, in order), the attachment line, and `composeInput`, which turns a draft into the input content or refuses it |
 | `theme.ts` | The one dark theme |
 | `diff-view.ts` | The full-screen diff view: loading per tab, layouts, keys, stage/unstage/revert, the revert confirm |
 | `diff-state.ts` | The diff view's state as a reducer: tabs (with a `since` tab of the working tree against a commit), tab contents, focus, selection, cursor, scroll, side by side, folds |
@@ -41,7 +43,7 @@ flowchart TB
     X -->|empty, 15+ rows| SF[full splash]
     X -->|empty, 11-14 rows| SC[compact splash]
     SV --> R2[rule]
-    R2 --> D[activity row] --> S[status row] --> E[editor] --> HINT[hint row]
+    R2 --> D[activity row] --> S[status row] --> A[attachment line, while the draft has images] --> E[editor] --> HINT[hint row]
   end
   subgraph agents[agents root: VStack]
     AT[title] --> AV[AgentsView: list and inspector] --> AH[hint row]
@@ -77,7 +79,7 @@ added to the feed but not to Durable, so they are not saved.
 
 `run.ts` registers one input listener that runs before the focused component. On the main screen without an overlay,
 it walks the `APP_KEYS` table (`app.interrupt`, `app.exit`, `app.cancel`, `app.tools.expand`, `app.agents`,
-`app.model.select`, `app.diff`); an action returning `false` lets the key through to the editor. `app.back` comes before
+`app.model.select`, `app.diff`, `app.clipboard.pasteImage`); an action returning `false` lets the key through to the editor. `app.back` comes before
 `app.interrupt` and shares its default key: on a fork or subagent it makes the main conversation active again, and on
 the main conversation it returns `false`, so the same key interrupts. The dashboard reads `tui.select.*` and
 `app.agents.diff`, `app.agents.merge`, `app.agents.stop` and `app.agents.remove` itself; the `/pstack` picker reads
@@ -88,6 +90,26 @@ skipped).
 
 Ctrl+C (`cancel`) stops a busy run, else clears the editor, else arms a 1.5 s window in which a second press exits;
 it always requests a render, because the editor's `setText` does not.
+
+## Images in the draft
+
+Ctrl+V (`app.clipboard.pasteImage`) runs `readPaste` on the system clipboard. Paths go in with `insertTextAtCursor`,
+spaced from the text around the cursor; text goes in as a bracketed paste, so pi-tui's editor makes a long one a paste
+marker. An image is prepared by `prepareImage` (`src/images.ts`): its format sniffed with Durable's
+`detectSupportedImageMimeType`, then the app's Photon processor fits it to the active conversation's model limits.
+`Attachments.add` numbers it, and the token is inserted.
+
+The editor's text stays the one source of truth. `Attachments` keeps every image pasted into the draft by number, and
+`inText(text)` returns those whose token is in the text, in the order the tokens first appear: deleting a token leaves
+its image out with no bookkeeping, and undo brings it back. pi-tui's `Editor.atomicTokens` gets the tokens of every
+attached image, so cursor movement, deletion and wrapping treat each as one character. `#setDraft` resets both
+together: Ctrl+C, a submitted message, and `/fork` (with the forked message's images, numbered from 1 as sent).
+
+On Enter, `composeInput(text, attached, imageModel(model, models))` returns the input or a refusal. A refusal puts the
+text back with `setText`, the attachments untouched, and shows the notice. Otherwise `MakoraSession.submit` takes the
+`UserInput` (a string, or `[{ type: "text" }, { type: "image" }, …]`) for the root, a fork, or a subagent through
+`admitInput`, whose held input for a woken child keeps the images in its JSON form. The transcript's user row carries
+`describeImage` of each image, and `transcript-view.ts` draws `[image #N]` tokens as `[image #N · png · 1280×800]`.
 
 ## The diff view
 

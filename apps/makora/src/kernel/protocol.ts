@@ -72,7 +72,8 @@ export interface ReadyMessage {
 /**
  * A call from Python into makora while cell `cellId` runs: `tool` runs a Durable tool (`read`, `write`, `edit`,
  * `bash`) as a nested call; `llm` runs one model call; `ctx` reads conversation context; `agents` runs one of the
- * subagent tools as a nested call; `quiz` hands a session-quiz bank to the `quiz_publish` tool as a nested call.
+ * subagent tools as a nested call; `quiz` hands a session-quiz bank to the `quiz_publish` tool as a nested call; `show`
+ * attaches an image, as base64, to the cell's result.
  */
 export type HostRequest = {
 	readonly type: "host_request";
@@ -96,6 +97,7 @@ export type HostRequest = {
 			readonly params: { readonly action: AgentAction; readonly args: Readonly<Record<string, unknown>> };
 	  }
 	| { readonly method: "quiz"; readonly params: { readonly bank: unknown } }
+	| { readonly method: "show"; readonly params: { readonly data: string } }
 );
 
 /** What a cell asks of its subagents through the `agents` host method. */
