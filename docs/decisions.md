@@ -261,3 +261,11 @@ The owner's decisions for Makora, newest last. Each entry says what was decided 
   DataFrame; `attach` describes the mechanism rather than the effect. It is synchronous like `ctx.input()`, so it works
   in plain loops, and it reports in the cell's output instead of raising when an image is refused, so one bad image
   does not lose the cell's other work.
+
+- **makora is a standalone repository (owner, 2026-11-17).** The GitHub fork of `earendil-works/pi` was deleted and
+  `github.com/mr-jones123/makora` re-created as its own repository with `main` and the `makora-v*` tags only (pi's 110
+  other branches and 337 tags left behind); the local `upstream` remote is removed. Why: the owner wants makora to be
+  its own project, not shown as a fork of pi. Fixes from pi are still taken by fetching pi's URL and cherry-picking or
+  merging. The 0.1.0 release and its tarball were re-created on the new repository; PRs #1 and #2 of the old one were
+  lost with it. The images commit was reworded from `feat:` to `fix:` at the owner's request, so the next release is
+  0.1.1.

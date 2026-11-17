@@ -61,12 +61,13 @@ through a release PR.
 
 ## Built on pi
 
-This repository is a fork of [earendil-works/pi](https://github.com/earendil-works/pi). makora lives in
-[`apps/makora`](apps/makora) and uses pi's packages from this repository: [`packages/durable`](packages/durable)
+makora started from [earendil-works/pi](https://github.com/earendil-works/pi) and is now its own repository. makora
+lives in [`apps/makora`](apps/makora) and uses pi's packages, kept in this repository: [`packages/durable`](packages/durable)
 (sessions and tasks), [`packages/ai`](packages/ai) (providers and login), [`packages/tui`](packages/tui),
 [`packages/chord`](packages/chord) and [`packages/schema`](packages/schema). Releases bundle makora with these
-packages as they are in this fork, so changes made here ship with it. Upstream pi is merged in from the `upstream`
-remote; pi's own README and docs are in [`packages/coding-agent`](packages/coding-agent).
+packages as they are here, so changes made here ship with it. Fixes from pi are brought in by hand (see
+[development](docs/development.md#bringing-in-changes-from-pi)); pi's own README and docs are in
+[`packages/coding-agent`](packages/coding-agent).
 
 ## Credits
 

@@ -1,7 +1,7 @@
 # Makora: vision
 
-Makora is an agent harness for long-running tasks that improves itself while it works. It is built on this fork of
-Pi, using `pi-durable` for session state and a persistent Python REPL as the agent's main tool.
+Makora is an agent harness for long-running tasks that improves itself while it works. It is built on Pi's packages,
+kept in this repository, using `pi-durable` for session state and a persistent Python REPL as the agent's main tool.
 
 ## The long-term goal
 

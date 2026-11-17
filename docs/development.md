@@ -173,16 +173,19 @@ Never edit `apps/makora/skills/`. Change `apps/makora/skills-src/` (the adapter 
 `node apps/makora/scripts/sync-skills.mjs` and commit the tree and the lock together. When makora gains a tool or a
 REPL helper, update the adapter's rows in the same PR.
 
-## Pulling from upstream Pi
+## Bringing in changes from pi
+
+makora is a standalone repository (`github.com/mr-jones123/makora`), no longer a GitHub fork of `earendil-works/pi`,
+and the checkout has no `upstream` remote. To take a fix from pi, fetch it explicitly and cherry-pick or merge it:
 
 ```sh
-git fetch upstream
-git merge upstream/main
+git fetch https://github.com/earendil-works/pi.git main
+git cherry-pick -x <sha>        # one fix
+git merge FETCH_HEAD            # everything
 ```
 
 Then run makora's check and tests. Durable is experimental upstream and its API can change; makora's CI runs on
-changes under `packages/` to catch that. Keep makora's edits to shared packages few and small (currently two lines of
-behavior in `packages/ai` and one path in `scripts/check-pinned-deps.mjs`), so merges stay easy.
+changes under `packages/` to catch that. Keep makora's edits to shared packages few and small, so merges stay easy.
 
 ## Conventions for makora code
 
