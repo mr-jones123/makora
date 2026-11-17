@@ -65,6 +65,8 @@ export interface DiffReady {
 	readonly top: number;
 	/** Side-by-side requested; shown when the width allows it. */
 	readonly split: boolean;
+	/** The diff alone at the full width, with the list hidden. */
+	readonly fullscreen: boolean;
 	/** Collapsed files of stacked diffs, by `fileKey`. */
 	readonly collapsed: ReadonlySet<string>;
 	/** A one-line result or error shown in place of the hint row until the next key. */
@@ -99,6 +101,7 @@ export type DiffAction =
 			readonly height: number;
 	  }
 	| { readonly type: "toggleSplit" }
+	| { readonly type: "toggleFullscreen" }
 	| { readonly type: "toggleCollapsed"; readonly key: string }
 	| { readonly type: "message"; readonly text: string | undefined };
 
@@ -132,6 +135,7 @@ export function reduceDiff(state: DiffState, action: DiffAction): DiffState {
 			cursor: 0,
 			top: 0,
 			split: previous?.split ?? false,
+			fullscreen: previous?.fullscreen ?? false,
 			collapsed: previous?.collapsed ?? new Set(),
 			message: undefined,
 		};
@@ -164,10 +168,12 @@ function reduceReady(state: DiffReady, action: Exclude<DiffAction, { type: "open
 		case "switchTab": {
 			const count = state.tabs.length;
 			const tab = (((state.tab + action.delta) % count) + count) % count;
-			return { ...state, tab, content: { kind: "loading" }, selected: 0, cursor: 0, top: 0, focus: "list" };
+			const loading = { kind: "loading" } as const;
+			return { ...state, tab, content: loading, selected: 0, cursor: 0, top: 0, focus: "list", fullscreen: false };
 		}
+		// The list is hidden in full screen, so moving to it leaves full screen.
 		case "focus":
-			return { ...state, focus: action.focus };
+			return { ...state, focus: action.focus, ...(action.focus === "list" ? { fullscreen: false } : {}) };
 		case "select": {
 			const count = listEntries(state).length;
 			const selected = Math.max(0, Math.min(count - 1, state.selected + action.delta));
@@ -190,6 +196,9 @@ function reduceReady(state: DiffReady, action: Exclude<DiffAction, { type: "open
 		}
 		case "toggleSplit":
 			return { ...state, split: !state.split, cursor: 0, top: 0 };
+		// Full screen shows only the diff, so up and down move in it.
+		case "toggleFullscreen":
+			return state.fullscreen ? { ...state, fullscreen: false } : { ...state, fullscreen: true, focus: "diff" };
 		case "toggleCollapsed": {
 			const collapsed = new Set(state.collapsed);
 			if (!collapsed.delete(action.key)) collapsed.add(action.key);

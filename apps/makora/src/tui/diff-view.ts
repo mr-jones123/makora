@@ -77,6 +77,7 @@ const DIFF_KEYS: readonly DiffKey[] = [
 	"app.diff.unstage",
 	"app.diff.revert",
 	"app.diff.split",
+	"app.diff.fullscreen",
 	"app.diff.ask",
 ];
 
@@ -294,6 +295,9 @@ export class DiffView implements Component {
 						: { type: "toggleSplit" },
 				);
 				break;
+			case "app.diff.fullscreen":
+				this.#dispatch({ type: "toggleFullscreen" });
+				break;
 			case "app.diff.ask":
 				this.#ask(state, doc?.rows[state.cursor]);
 				break;
@@ -383,6 +387,7 @@ export class DiffView implements Component {
 			[first("app.diff.unstage"), "unstage"],
 			[first("app.diff.revert"), "revert"],
 			[width >= SPLIT_FROM ? first("app.diff.split") : [], state.split ? "unified" : "side by side"],
+			[stacked ? [] : first("app.diff.fullscreen"), state.fullscreen ? "show list" : "full screen"],
 			[first("app.diff.ask"), "ask"],
 		]);
 	}
@@ -397,6 +402,7 @@ export class DiffView implements Component {
 		const focusDiff = paneOf(state, layout) === "diff";
 		if (layout === "stacked")
 			return focusDiff ? docLines(state, doc, width, height, true) : listLines(state, width, height, true);
+		if (state.fullscreen) return docLines(state, doc, width, height, true);
 		const listWidth =
 			content.kind === "history"
 				? Math.max(50, Math.min(80, Math.floor(width * 0.5)))
@@ -418,8 +424,9 @@ function layoutFor(width: number, split: boolean): Layout {
 	return split && width >= SPLIT_FROM ? "split" : "list";
 }
 
-/** The pane that up and down move in: B's file tabs have only the diff. */
+/** The pane that up and down move in: B's file tabs and full screen have only the diff. */
 function paneOf(state: DiffReady, layout: Layout): "list" | "diff" {
+	if (state.fullscreen && layout !== "stacked") return "diff";
 	return layout === "stacked" && state.content.kind === "files" ? "diff" : state.focus;
 }
 

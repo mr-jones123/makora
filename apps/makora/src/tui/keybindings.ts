@@ -45,6 +45,7 @@ export const MAKORA_KEYBINDINGS = {
 	"app.diff.unstage": { defaultKeys: "u", description: "unstage" },
 	"app.diff.revert": { defaultKeys: "r", description: "revert" },
 	"app.diff.split": { defaultKeys: "v", description: "side by side" },
+	"app.diff.fullscreen": { defaultKeys: "f", description: "full screen" },
 	"app.diff.ask": { defaultKeys: "a", description: "ask" },
 	"app.diff.close": { defaultKeys: "escape", description: "back" },
 	// The /pstack picker's own keys; only the picker reads them. It moves, changes and closes with `tui.select.*`.

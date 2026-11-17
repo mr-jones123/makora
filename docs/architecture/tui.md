@@ -123,7 +123,8 @@ its own keys (`app.diff.*`) reach it before pi-tui's scrolling. Data comes from 
 | `git/log.ts` | `Commit` and the `git log --numstat` parser |
 
 Results that arrive after the user moved to another tab or file are dropped. The layout follows the width: B (one
-stacked scroll) below 100 columns, C (side by side) from 120 columns when toggled, A otherwise. `a` closes the view
+stacked scroll) below 100 columns, C (side by side) from 120 columns when toggled, A otherwise. `f` hides the list
+and gives A or C the full width, so long lines are not cut at the pane's edge; `f` again or `←` brings it back. `a` closes the view
 and calls the editor's `insertTextAtCursor` with the block from `diff-ask.ts`.
 
 ## The agents dashboard
