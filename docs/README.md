@@ -1,7 +1,7 @@
 # Makora docs
 
 Makora is a self-evolving agent harness for long-running tasks, built on this fork of Pi
-(`github.com/mr-jones123/pi`, upstream `earendil-works/pi`). The app lives in `apps/makora`. These docs are the source
+(`github.com/mr-jones123/makora`, upstream `earendil-works/pi`). The app lives in `apps/makora`. These docs are the source
 of truth for what makora is, what it does today, how it is built, and what comes next. When code and docs disagree,
 fix one of them in the same change.
 
@@ -9,10 +9,11 @@ fix one of them in the same change.
 
 | Phase | What | State |
 | --- | --- | --- |
-| 1 | App skeleton: CLI, Durable sessions, TUI, Claude subscription login with accounts, bundled pstack and no-mistakes with a sync CI job | **Built**, committed on `main`, not pushed |
+| 1 | App skeleton: CLI, Durable sessions, TUI, Claude subscription login with accounts, bundled pstack and no-mistakes with a sync CI job | **Built** |
 | 2 | Persistent Python REPL as the model's one tool: file and shell helpers, `llm`, `ctx`, per-cell snapshots, `--ephemeral`; plus the `/diff` view | **Built**, with `/fork`; open: pruning |
-| 3 | Subagents, each with its own worktree and REPL; `wait_agents`; the agents dashboard | **Built**, not committed; with pstack model tiers (`/pstack`) |
-| Quiz | `/quiz`: a self-scoring HTML quiz on what a session built and decided | **Built**, not committed; the wiki waits for the memory system |
+| 3 | Subagents, each with its own worktree and REPL; `wait_agents`; the agents dashboard | **Built**, with pstack model tiers (`/pstack`) |
+| Quiz | `/quiz`: a self-scoring HTML quiz on what a session built and decided | **Built**; the wiki waits for the memory system |
+| Releases | `install.sh`, `makora update`, versioning from conventional commits through a release PR | **Built**; first release 0.1.0 when its release PR merges |
 | 4+ | Background service, autonomous mode, evals against Prime Agent, self-evolution, sandboxes | Planned |
 
 Details and open items: [roadmap.md](roadmap.md).

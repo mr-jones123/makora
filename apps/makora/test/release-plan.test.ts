@@ -99,11 +99,11 @@ describe("the changelog", () => {
 			"2026-11-17",
 		);
 		const link = (sha: string) =>
-			`([${sha.padEnd(7, "0")}](https://github.com/mr-jones123/pi/commit/${sha.padEnd(40, "0")}))`;
+			`([${sha.padEnd(7, "0")}](https://github.com/mr-jones123/makora/commit/${sha.padEnd(40, "0")}))`;
 		assert.equal(
 			plan.changelog,
 			[
-				"## [0.2.0](https://github.com/mr-jones123/pi/releases/tag/makora-v0.2.0) - 2026-11-17",
+				"## [0.2.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.2.0) - 2026-11-17",
 				"",
 				"### Breaking changes",
 				"",

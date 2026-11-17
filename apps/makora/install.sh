@@ -2,11 +2,11 @@
 # Installs or updates makora from a GitHub release: checks the tarball's sha256, unpacks it to
 # <install dir>/<version>, points <install dir>/current at it and links <bin dir>/makora. Safe to rerun.
 #
-#   curl -fsSL https://raw.githubusercontent.com/mr-jones123/pi/main/apps/makora/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/mr-jones123/makora/main/apps/makora/install.sh | sh
 #   ... | sh -s -- --version 0.2.0    install that release
 #   ... | sh -s -- --uninstall        remove makora; sessions and settings in ~/.makora stay
 #
-# Environment: MAKORA_REPO (default mr-jones123/pi), MAKORA_INSTALL_DIR (default ~/.makora/app),
+# Environment: MAKORA_REPO (default mr-jones123/makora), MAKORA_INSTALL_DIR (default ~/.makora/app),
 # MAKORA_BIN_DIR (default ~/.local/bin, then whatever the last install used).
 # Testing aid: MAKORA_RELEASE_BASE replaces https://api.github.com, so tests can serve fake releases.
 set -eu
@@ -32,7 +32,7 @@ main() {
   [ -n "${HOME:-}" ] || die "HOME is not set"
   # `makora update` passes its install directory with links resolved, as the launcher found it.
   home_real=$(cd "$HOME" 2>/dev/null && pwd -P) || home_real=$HOME
-  repo=${MAKORA_REPO:-mr-jones123/pi}
+  repo=${MAKORA_REPO:-mr-jones123/makora}
   install_dir=${MAKORA_INSTALL_DIR:-$HOME/.makora/app}
   bin_dir=${MAKORA_BIN_DIR:-}
   if [ -z "$bin_dir" ] && [ -f "$install_dir/bin-dir" ]; then bin_dir=$(cat "$install_dir/bin-dir"); fi

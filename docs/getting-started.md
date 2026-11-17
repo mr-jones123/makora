@@ -3,10 +3,10 @@
 ## Install the command
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mr-jones123/pi/main/apps/makora/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mr-jones123/makora/main/apps/makora/install.sh | sh
 ```
 
-The installer takes the newest GitHub release of `mr-jones123/pi` tagged `makora-v*`, checks its sha256, unpacks it to
+The installer takes the newest GitHub release of `mr-jones123/makora` tagged `makora-v*`, checks its sha256, unpacks it to
 `~/.makora/app/<version>` and links `~/.local/bin/makora`. If `~/.local/bin` is not on your `PATH`, it prints the line
 to add to your shell profile. It also builds the Python environment the REPL runs in, so the first session does not
 wait for it.
@@ -22,7 +22,7 @@ prints the command that installs it and stops; it never installs them itself and
 | `makora --version` | The installed version and the commit it was built from |
 
 `MAKORA_INSTALL_DIR` (default `~/.makora/app`), `MAKORA_BIN_DIR` (default `~/.local/bin`) and `MAKORA_REPO` (default
-`mr-jones123/pi`) change where the installer puts makora and which repository it installs from. An update keeps the
+`mr-jones123/makora`) change where the installer puts makora and which repository it installs from. An update keeps the
 version it replaced, so sessions still running on it keep working until they restart.
 
 A release is one bundle of makora with this repository's `packages/*`, so it runs exactly the fork's code

@@ -1,14 +1,15 @@
 # makora
 
-A self-evolving agent harness for long-running tasks, built on [pi-durable](../../packages/durable). Phases 1 and 2
-are built: the app skeleton, and a persistent Python REPL as the model's one tool, plus a `/diff` view. See
+A durable, self-evolving agent harness for long-running tasks, built on [pi-durable](../../packages/durable). Built
+so far: the app skeleton, a persistent Python REPL as the model's one tool, `/diff` and `/fork`, subagents with their
+own worktrees and the agents dashboard, `/pstack` model tiers, `/quiz`, and releases with `install.sh`. See
 [the docs](../../docs/README.md): [vision](../../docs/vision.md), [roadmap](../../docs/roadmap.md) and
 [decisions](../../docs/decisions.md).
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mr-jones123/pi/main/apps/makora/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mr-jones123/makora/main/apps/makora/install.sh | sh
 ```
 
 Installs the newest `makora-v*` GitHub release: one bundle of makora with this repository's `packages/*`, no npm

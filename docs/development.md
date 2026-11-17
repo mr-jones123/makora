@@ -13,7 +13,7 @@ TypeScript only, no hardcoded key checks, pinned dependencies, never `git add -A
 | `apps/p2`, `apps/p2-mac`, `apps/p3` | Upstream prototypes, not used by makora |
 | `.github/workflows/makora*.yml` | Makora's CI |
 
-Remotes: `origin` is the fork `github.com/mr-jones123/pi`; `upstream` is `github.com/earendil-works/pi`.
+Remotes: `origin` is the fork `github.com/mr-jones123/makora`; `upstream` is `github.com/earendil-works/pi`.
 
 ## Running from source
 

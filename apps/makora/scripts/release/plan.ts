@@ -121,7 +121,7 @@ function parseVersion(version: string): [number, number, number] {
 }
 
 /** The GitHub repository the changelog links to. */
-export const REPOSITORY_URL = "https://github.com/mr-jones123/pi";
+export const REPOSITORY_URL = "https://github.com/mr-jones123/makora";
 
 /** The changelog section of release `version` on `date` (YYYY-MM-DD): breaking changes, features, fixes, reverts. */
 export function renderChangelog(version: string, date: string, commits: readonly PlannedCommit[]): string {

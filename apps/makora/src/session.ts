@@ -186,7 +186,7 @@ async function open(
 				settings: app.settings.harness,
 				env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? meta.cwd }),
 				identity: {
-					attribution: { name: "makora", url: "https://github.com/mr-jones123/pi", categories: ["cli-agent"] },
+					attribution: { name: "makora", url: "https://github.com/mr-jones123/makora", categories: ["cli-agent"] },
 				},
 				onReport: (report) => notify(describeReport(report)),
 			},

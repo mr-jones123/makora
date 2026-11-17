@@ -21,7 +21,7 @@ import { delimiter, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { INSTALL } from "../src/install.ts";
 
-const REPO = "mr-jones123/pi";
+const REPO = "mr-jones123/makora";
 
 /** A release the fake GitHub serves: its tag, and its assets by name. */
 interface FakeRelease {
