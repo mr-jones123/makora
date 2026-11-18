@@ -2,6 +2,16 @@
 
 Generated from conventional commits by `scripts/release-plan.mjs` in the release PR; do not edit by hand.
 
+## [0.3.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.3.0) - 2026-11-18
+
+### Features
+
+- makora memory: /dream, memory.search, and the Obsidian wiki ([b0cb6f9](https://github.com/mr-jones123/makora/commit/b0cb6f96c7d7864a03a0adbc6088f23327863caa))
+
+### Fixes
+
+- makora status row keeps the context gauge, and Ctrl+O toggles once ([6ee301a](https://github.com/mr-jones123/makora/commit/6ee301a5d8bb90b23d0698f3d3a8cc684cedb7aa))
+
 ## [0.2.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.2.0) - 2026-11-17
 
 ### Features
