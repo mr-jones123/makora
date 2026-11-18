@@ -40,25 +40,169 @@ user already writes. A dream may suggest an `AGENTS.md` line in its report; it n
 No knowledge graph and no separate timeline: links between claims cover what a graph would, and claim versions
 are the timeline.
 
-### Schema (outline)
+### Schema
 
-Adapted from memorantado's hybrid layer (`src/db/schema.sql`), without its graph and timeline tables.
+`apps/makora/src/memory/store.ts` creates every table. Times are milliseconds since the epoch; → marks a column that
+names a row of another table. Each example is from a fake dream over one message, "We keep the cache in
+~/.cache/demo and never in the repo."
 
-| Table | Holds |
+How the tables connect: an episode backs a version's evidence, a version belongs to a claim, and a claim sits under a
+subject, which is a wiki page. A dream never edits an episode; it adds versions and evidence, so every claim traces
+back to the turn it came from.
+
+#### `projects`: one row per repository
+
+| Column | Meaning |
 | --- | --- |
-| `projects` | id (git remote, else the repository's first commit), name |
-| `episodes` | one turn: project, session id, entry id, role, text, content hash, time |
-| `claims` | a claim as it stands now: project, scope (`global` or project), kind, subject, statement, status, importance |
-| `claim_versions` | every version of a claim: valid from/to (when true in the world), recorded/retracted at (when we learned or dropped it), the dream run and prompt version that wrote it |
-| `evidence` | a claim version's support: episode, exact quote, its span, content hash, polarity (`supports`, `contradicts`, `mentions`) |
-| `conflicts` | two claims that disagree, and how the disagreement was resolved |
-| `links` | claim to claim, with a relation |
-| `subjects` | what a wiki page is about: a stable key (its file name) and a title that may change |
-| `dreams` | one dream run: status, sessions read, budget, staged changes, usage, cost, report, error, times |
-| `reads` | each claim a `memory.search` returned, to find claims nothing uses |
-| `wiki_pages` | each generated page: path and content hash |
-| `episodes_fts`, `claims_fts` | FTS5 indexes |
-| `episodes_vec`, `claims_vec` | sqlite-vec `vec0` tables, created at the first embedding and rebuilt when the embedding model changes |
+| `id` | Primary key: the git remote as `host/owner/repo`, else `commit:<first commit>`, else `dir:<folder>` |
+| `name` | The project's folder name in the wiki |
+
+Example: `github.com/me/demo`, `demo`.
+
+#### `sessions`: one row per session a dream has read
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Primary key: the makora session id |
+| `project` | → `projects` |
+| `title`, `cwd` | From the session's `meta.json` |
+| `created_at`, `updated_at` | From the session |
+| `dreamed_through` | The session's `updated_at` when a dream last read it; a later update makes it due again |
+| `dreamed_episode` | The last episode a dream read; the next dream reads only those after it |
+
+Example: `01a1ecc2…`, `github.com/me/demo`, its title, `/…/repo`, `dreamed_episode` 2.
+
+#### `episodes`: one row per message of a session, never edited
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Primary key |
+| `session` | → `sessions` |
+| `conversation`, `entry` | Where the message is in the session; unique together |
+| `role` | `user`, `assistant` or `tool` |
+| `text` | The message; a tool call reads `→ python` and its code, and a long tool result is cut in the middle |
+| `hash` | sha256 of `text` |
+
+Example: `1`, the session, `1`, `7`, `user`, "We keep the cache in ~/.cache/demo and never in the repo.", `510da24c…`.
+
+#### `subjects`: one row per wiki page
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Primary key |
+| `project` | → `projects`; empty for a global subject |
+| `key` | The page's file name; never changes; unique per project |
+| `title` | The page's title; may change, and goes into the page's `aliases` |
+
+Example: `1`, `github.com/me/demo`, `what-the-user-asked`, "What the user asked".
+
+#### `claims`: one row per claim, as it stands now
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Primary key |
+| `project` | → `projects`; empty for a claim about the user in every project |
+| `subject` | → `subjects` |
+| `kind` | `fact`, `decision` or `preference` |
+| `statement` | Its current wording |
+| `status` | `proposed`, `confirmed`, `disputed` or `superseded` |
+| `superseded_by` | → `claims`: the claim that replaced it |
+| `created_at`, `updated_at`, `checked_at` | When it was made, last changed, and last checked against a transcript |
+
+Example: `1`, `github.com/me/demo`, subject `1`, `fact`, "The user asked: We keep the cache…", `confirmed`.
+
+#### `claim_versions`: one row per wording a claim has had
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Primary key |
+| `claim` | → `claims` |
+| `statement`, `status` | That version's wording and status |
+| `valid_from`, `valid_to` | When it held in the world |
+| `recorded_at`, `retracted_at` | When memory took it in and let it go; the current version has no `retracted_at` |
+| `dream` | → `dreams`: the dream that wrote it |
+| `prompt_version` | The dream prompts that wrote it, such as `memory-1` |
+
+Example: `1`, claim `1`, its wording, `confirmed`, dream `1`, `memory-1`.
+
+#### `evidence`: one row per quote backing a version
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Primary key |
+| `version` | → `claim_versions` |
+| `episode` | → `episodes` |
+| `quote` | The exact text, checked to appear in that episode |
+| `polarity` | `supports`, `contradicts` or `mentions` |
+
+Example: `1`, version `1`, episode `1`, "We keep the cache in ~/.cache/demo and never in the repo.", `supports`.
+
+#### `conflicts`: one row per pair of claims that disagree
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Primary key |
+| `claim`, `other` | → `claims` |
+| `reason` | Why they disagree |
+| `status` | `open`, `resolved` or `ignored` |
+| `created_at`, `resolved_at` | |
+
+Example: claims `3` and `5`, "two cache locations", `open`.
+
+#### `links`: one row per relation between two claims
+
+| Column | Meaning |
+| --- | --- |
+| `from_claim`, `to_claim` | → `claims` |
+| `relation` | Such as "caused by" or "part of"; the three columns are the key |
+
+Example: `3`, `5`, "part of".
+
+#### `dreams`: one row per dream
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Primary key |
+| `status` | `pending`, `running`, `completed`, `failed` or `canceled` |
+| `project`, `cwd` | What it dreams about, and where it was started |
+| `sessions` | JSON list of the session ids it read |
+| `budget_usd`, `cost_usd`, `input_tokens`, `output_tokens` | Its budget and what it spent |
+| `staged` | JSON of its checked operations and what was dropped, kept also when it fails |
+| `report`, `error` | What it did, or why it failed |
+| `pid`, `cancel_requested` | Its worker process, and whether `/dream cancel` asked it to stop |
+| `created_at`, `started_at`, `ended_at` | |
+
+Example: `1`, `completed`, `github.com/me/demo`, `["01a1ecc2…"]`, budget 2, spent 0.0055, 1,031 and 163 tokens,
+"Read 1 session(s) in 1 slice(s); 1 notes…".
+
+#### `reads`: one row per claim a search returned
+
+| Column | Meaning |
+| --- | --- |
+| `claim` | → `claims` |
+| `at` | When the search returned it |
+
+#### `wiki_pages`: one row per page written
+
+| Column | Meaning |
+| --- | --- |
+| `root`, `path` | The wiki folder and the page in it; the key |
+| `hash` | sha256 of what was written |
+
+Example: `/…/vault/makora`, `.makora-wiki`, `fdb147e4…`; one row per page.
+
+#### `meta`: one row per setting of the database
+
+| Column | Meaning |
+| --- | --- |
+| `key`, `value` | Today only `vectors`: the model and size of the stored vectors, such as `embeddinggemma:768` |
+
+#### Search indexes
+
+| Table | Columns |
+| --- | --- |
+| `episodes_fts`, `claims_fts` | FTS5 over `text` and `statement`; the row id is the episode's or the claim's, kept by triggers |
+| `episodes_vec`, `claims_vec` | sqlite-vec: `episode` or `claim` (the id) and `embedding float[<size>]`, compared by cosine distance; made at the first embedding and emptied when the model changes |
 
 Kinds: `fact`, `decision`, `preference`. Statuses: `proposed`, `confirmed`, `disputed`, `superseded`.
 

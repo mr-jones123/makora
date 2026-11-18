@@ -95,7 +95,9 @@ Changing `memory.embedModel` embeds everything again, since vectors of two model
 
 ## Where memory lives
 
-`~/.makora/memory/memory.sqlite` holds everything; the wiki is rendered from it and never read back. Settings are in
+`~/.makora/memory/memory.sqlite` holds everything; the wiki is rendered from it and never read back. It is made the
+first time you run `/dream` or a cell searches memory; nothing turns it on. Every table, column and what a row is:
+[the schema](../../apps/makora/docs/memory.md#schema). Settings are in
 [configuration.md](../reference/configuration.md#settingsjson-fields).
 
 Not built yet: reading your own notes vault as a source, pruning claims nothing reads, and loading a short index of
