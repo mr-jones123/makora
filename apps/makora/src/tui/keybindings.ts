@@ -1,6 +1,8 @@
 // Makora's key bindings: its app actions merged over pi-tui's table, with the user's overrides from keybindings.json.
 import { readFileSync } from "node:fs";
 import {
+	getKeybindings,
+	isKeyRelease,
 	type KeybindingDefinitions,
 	type KeybindingsConfig,
 	KeybindingsManager,
@@ -75,6 +77,16 @@ export function installKeybindings(file: string): KeybindingsManager {
 	const manager = new KeybindingsManager(KEYBINDINGS, readUserBindings(file));
 	setKeybindings(manager);
 	return manager;
+}
+
+/**
+ * The bindings of `ids` that `data` presses, in order. A key's release presses none: terminals with the Kitty keyboard
+ * protocol report it too, it matches the same bindings, and acting on it would run a shortcut twice and undo a toggle.
+ */
+export function pressedBindings<K extends MakoraKeybinding>(data: string, ids: readonly K[]): K[] {
+	if (isKeyRelease(data)) return [];
+	const keys = getKeybindings();
+	return ids.filter((id) => keys.matches(data, id));
 }
 
 const KEY_NAMES: Readonly<Record<string, string>> = {

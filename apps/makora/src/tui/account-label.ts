@@ -1,4 +1,4 @@
-// The status row's account label: which login pays for the current model's requests.
+// The status row's account label: how much of the current login's plan is used, and a warning when it must log in again.
 import type { AccountSummary, PlanUsage } from "../auth/types.ts";
 
 /** The label and whether it shows in the warning color. */
@@ -12,9 +12,9 @@ export interface AccountLabel {
 export const GRANT_WARNING_MS = 5 * 24 * 60 * 60 * 1000;
 
 /**
- * The label of `providerId`'s active account among `accounts`: its email or label, then `subscription` (and `extra
- * usage` for Anthropic, which bills subscription use of other apps as extra usage) or `api key`, then the fullest plan
- * usage window. Undefined when the provider has no active account.
+ * The label of `providerId`'s active account among `accounts`: its fullest plan usage window, such as `7d 59%`, and
+ * `login expires soon · /login` when its grant ends within `GRANT_WARNING_MS`. Undefined when the provider has no active
+ * account. Which account it is stays out of the row, where it crowded out the context gauge; `/accounts` shows it.
  */
 export function accountLabel(
 	accounts: readonly AccountSummary[],
@@ -24,12 +24,6 @@ export function accountLabel(
 ): AccountLabel | undefined {
 	const account = accounts.find((candidate) => candidate.providerId === providerId && candidate.active);
 	if (account === undefined) return undefined;
-	const parts = [account.identity?.email ?? account.label];
-	if (account.type === "api_key") parts.push("api key");
-	else if (account.subscription) {
-		parts.push("subscription");
-		if (providerId === "anthropic") parts.push("extra usage");
-	}
 	const fullest =
 		usage?.providerId === providerId
 			? usage.windows.reduce<PlanUsage["windows"][number] | undefined>(
@@ -37,7 +31,10 @@ export function accountLabel(
 					undefined,
 				)
 			: undefined;
-	if (fullest !== undefined) parts.push(`${fullest.label} ${Math.round(fullest.usedPercent)}%`);
 	const warn = account.grantExpiresAt !== undefined && account.grantExpiresAt - now < GRANT_WARNING_MS;
+	const parts = [
+		...(fullest === undefined ? [] : [`${fullest.label} ${Math.round(fullest.usedPercent)}%`]),
+		...(warn ? ["login expires soon · /login"] : []),
+	];
 	return { text: parts.join(" · "), warn };
 }

@@ -20,7 +20,7 @@
 | `commands.ts` | The slash command table, autocomplete entries, login and account flows, the `/fork` picker, `/pstack` with its model, thinking, budget and reset dialogs; `/skill:setup-pstack` runs `/pstack` |
 | `pstack-picker.ts` | The `/pstack` overlay: tiers and roles drawn through `list-window.ts`, Enter, the seat editing of panel roles, `b` and `r`; it hands the edited `PstackConfig` back on Esc |
 | `keybindings.ts` | Makora's bindings merged over pi-tui's, plus user overrides |
-| `account-label.ts` | The status row's account label |
+| `account-label.ts` | The status row's right side: the login's fullest plan usage window and a warning when its grant ends soon |
 | `rounded-editor.ts` | pi-tui's editor drawn in a rounded box |
 | `clipboard.ts` | What Ctrl+V pastes (`readPaste`: copied files, else an image, else text) from a `ClipboardReader`; `systemClipboard()` reads it through pi-tui's `getNativeClipboard()` |
 | `attachments.ts` | The draft's images (`Attachments`: token numbers, the images whose tokens are in the text, in order), the attachment line, and `composeInput`, which turns a draft into the input content or refuses it |
@@ -79,7 +79,9 @@ added to the feed but not to Durable, so they are not saved.
 
 `run.ts` registers one input listener that runs before the focused component. On the main screen without an overlay,
 it walks the `APP_KEYS` table (`app.interrupt`, `app.exit`, `app.cancel`, `app.tools.expand`, `app.agents`,
-`app.model.select`, `app.diff`, `app.clipboard.pasteImage`); an action returning `false` lets the key through to the editor. `app.back` comes before
+`app.model.select`, `app.diff`, `app.clipboard.pasteImage`); an action returning `false` lets the key through to the editor. A key's
+release presses nothing (`pressedBindings`): terminals with the Kitty keyboard protocol report releases, which match
+the same bindings, and pi-tui hands listeners every event, so acting on them ran each shortcut twice. `app.back` comes before
 `app.interrupt` and shares its default key: on a fork or subagent it makes the main conversation active again, and on
 the main conversation it returns `false`, so the same key interrupts. The dashboard reads `tui.select.*` and
 `app.agents.diff`, `app.agents.merge`, `app.agents.stop` and `app.agents.remove` itself; the `/pstack` picker reads

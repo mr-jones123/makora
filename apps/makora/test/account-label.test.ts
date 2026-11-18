@@ -16,62 +16,50 @@ const account = (fields: Partial<AccountSummary>): AccountSummary => ({
 	...fields,
 });
 
+const usage = {
+	providerId: "anthropic",
+	windows: [
+		{ label: "5h", usedPercent: 42.4 },
+		{ label: "7d", usedPercent: 12 },
+	],
+};
+
 describe("account label", () => {
-	it("names an Anthropic subscription by email and says it bills extra usage", () => {
-		const label = accountLabel([account({ identity: { email: "me@example.com" } })], "anthropic", undefined, NOW);
-		assert.deepEqual(label, { text: "me@example.com · subscription · extra usage", warn: false });
+	it("is the fullest plan usage window, without the account's name or kind", () => {
+		const label = accountLabel([account({ identity: { email: "me@example.com" } })], "anthropic", usage, NOW);
+		assert.deepEqual(label, { text: "5h 42%", warn: false });
 	});
 
-	it("uses the label without an email, and marks API keys and other subscriptions", () => {
-		assert.equal(accountLabel([account({ subscription: false })], "anthropic", undefined, NOW)?.text, "Claude Max");
-		assert.equal(
+	it("is empty for an active account without plan usage, such as an API key", () => {
+		assert.deepEqual(
 			accountLabel(
-				[account({ providerId: "openai", type: "api_key", subscription: false, label: "work key" })],
+				[account({ providerId: "openai", type: "api_key", subscription: false })],
 				"openai",
 				undefined,
 				NOW,
-			)?.text,
-			"work key · api key",
+			),
+			{ text: "", warn: false },
 		);
-		assert.equal(
-			accountLabel([account({ providerId: "openai-codex", label: "ChatGPT" })], "openai-codex", undefined, NOW)
-				?.text,
-			"ChatGPT · subscription",
-		);
+		assert.equal(accountLabel([account({})], "anthropic", { ...usage, providerId: "openai" }, NOW)?.text, "");
 	});
 
 	it("labels only the active account of the model's provider", () => {
 		const accounts = [
-			account({ id: "old", active: false, label: "Old" }),
-			account({ id: "new", label: "New" }),
-			account({ providerId: "openai", id: "o", label: "OpenAI" }),
+			account({ id: "old", active: false, grantExpiresAt: NOW }),
+			account({ id: "new" }),
+			account({ providerId: "openai", id: "o" }),
 		];
-		assert.equal(accountLabel(accounts, "anthropic", undefined, NOW)?.text.startsWith("New"), true);
+		assert.deepEqual(accountLabel(accounts, "anthropic", undefined, NOW), { text: "", warn: false });
 		assert.equal(accountLabel(accounts, "google", undefined, NOW), undefined);
 	});
 
-	it("appends the fullest plan usage window", () => {
-		const usage = {
-			providerId: "anthropic",
-			windows: [
-				{ label: "5h", usedPercent: 42.4 },
-				{ label: "7d", usedPercent: 12 },
-			],
-		};
-		assert.equal(
-			accountLabel([account({ label: "Max" })], "anthropic", usage, NOW)?.text,
-			"Max · subscription · extra usage · 5h 42%",
-		);
-		assert.equal(
-			accountLabel([account({ label: "Max" })], "anthropic", { ...usage, providerId: "openai" }, NOW)?.text,
-			"Max · subscription · extra usage",
-		);
-	});
-
-	it("warns when the grant ends within five days", () => {
-		assert.equal(
-			accountLabel([account({ grantExpiresAt: NOW + GRANT_WARNING_MS - 1 })], "anthropic", undefined, NOW)?.warn,
-			true,
+	it("says to log in again when the grant ends within five days", () => {
+		assert.deepEqual(
+			accountLabel([account({ grantExpiresAt: NOW + GRANT_WARNING_MS - 1 })], "anthropic", usage, NOW),
+			{
+				text: "5h 42% · login expires soon · /login",
+				warn: true,
+			},
 		);
 		assert.equal(
 			accountLabel([account({ grantExpiresAt: NOW + GRANT_WARNING_MS + 1 })], "anthropic", undefined, NOW)?.warn,

@@ -42,7 +42,13 @@ import { type AgentKind, type DashboardRow, dashboardRows, whereOf } from "./das
 import { Dialogs } from "./dialogs.ts";
 import type { SinceTab } from "./diff-state.ts";
 import { DiffView } from "./diff-view.ts";
-import { installKeybindings, keyName, MAKORA_KEYBINDINGS, type MakoraKeybinding } from "./keybindings.ts";
+import {
+	installKeybindings,
+	keyName,
+	MAKORA_KEYBINDINGS,
+	type MakoraKeybinding,
+	pressedBindings,
+} from "./keybindings.ts";
 import { RoundedEditor } from "./rounded-editor.ts";
 import { SessionFeed } from "./session-feed.ts";
 import { COMPACT_SPLASH_HEIGHT, SPLASH_HEIGHT, Splash, type SplashVariant } from "./splash.ts";
@@ -518,8 +524,13 @@ class MakoraTui implements CommandHost {
 
 	#onKey(data: string): TuiInputListenerResult {
 		if (this.#ui.view.kind !== "main" || this.#tui.hasOverlay()) return undefined;
-		const keys = getKeybindings();
-		for (const [id, action] of APP_KEYS) if (keys.matches(data, id) && action(this)) return { consume: true };
+		// Bindings sharing a key are tried in order; an action returning false passes the key on, as `app.back` does to
+		// `app.interrupt` on the main conversation.
+		const pressed = pressedBindings(
+			data,
+			APP_KEYS.map(([id]) => id),
+		);
+		for (const [id, action] of APP_KEYS) if (pressed.includes(id) && action(this)) return { consume: true };
 		return undefined;
 	}
 

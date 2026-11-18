@@ -52,8 +52,8 @@ makora
 1. The splash shows while the session is empty.
 2. Type `/login`, choose Anthropic, then Claude Pro/Max, and finish in the browser (or paste the code back).
 3. Type `/model` and pick a model.
-4. Check the status row: the account label should read your email, `subscription · extra usage`, and a plan usage
-   window such as `5h 42%` when Anthropic answers the usage request.
+4. Check the status row: its right side shows a plan usage window such as `5h 42%` once Anthropic answers the usage
+   request, and `/accounts` shows which account is active.
 
 Without logging in, `makora --fake` runs a scripted fake model: it answers in markdown, and a prompt with a keyword such
 as `python`, `remember`, `file` or `crash` makes it run scripted Python cells (all keywords:

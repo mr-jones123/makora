@@ -25,19 +25,20 @@ xAI and Meta.
 
 ## The status row label
 
-The right side of the status row names who pays for the current model:
+The right side of the status row says how much of the current login's plan is used, and warns when something needs
+you. It does not name the account, which crowded out the context gauge; `/accounts` shows which one is active.
 
 | Label | Means |
 | --- | --- |
-| `you@example.com · subscription · extra usage · 5h 42%` | Anthropic Claude Pro/Max login; the fullest plan usage window |
-| `you@example.com · subscription` | Another provider's subscription login |
-| `anthropic 1 · api key` | An API-key account |
+| `5h 42%` | A subscription login; its fullest plan usage window |
+| (empty) | A login without plan usage, such as an API-key account, or before the usage request answered |
+| `5h 42% · login expires soon · /login` (warning color) | An Anthropic grant ends within 5 days |
 | `fake model` | `--fake` |
 | `not logged in · /login` (warning color) | No account for this provider |
 | `api key · <source>` | No stored account, but the provider has a key from its environment variable |
 | `auth file unreadable` (warning color) | `~/.makora/auth.json` is corrupt or not readable |
 
-The label turns to the warning color when an Anthropic grant ends within 5 days. Anthropic ends an OAuth grant about
+A narrow status row shortens the folder from its start, then drops it, before the context gauge loses anything. Anthropic ends an OAuth grant about
 30 days after login regardless of refreshes (observed by oh-my-pi, not documented by Anthropic); log in again to start
 a new one. Plan usage refreshes every 5 minutes and is shown only when Anthropic's usage endpoint answers.
 

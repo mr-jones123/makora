@@ -108,22 +108,33 @@ export interface StatusRow {
 
 const GAUGE_CELLS = 20;
 
-/** `<model> · <thinking> · <cwd> (<branch>) · ctx <gauge> NN% of <window>` with the account label on the right. */
+// A folder shorter than this says nothing; the status row drops it instead.
+const MIN_FOLDER = 8;
+
+/**
+ * `<model> · <thinking> · <cwd> (<branch>) · ctx <gauge> NN% of <window>` with the account label on the right. A narrow
+ * row shortens the folder from its start, then drops it, before the context gauge loses a cell.
+ */
 export function statusLine(row: StatusRow, width: number): string {
 	const ratio =
 		row.contextTokens !== undefined && row.contextWindow ? Math.min(1, row.contextTokens / row.contextWindow) : 0;
 	const filled = Math.round(ratio * GAUGE_CELLS);
 	const gauge = `${theme.accent("━".repeat(filled))}${theme.border("━".repeat(GAUGE_CELLS - filled))}`;
 	const window = row.contextWindow === undefined ? "?" : formatTokens(row.contextWindow);
+	const context = `${theme.muted(" · ctx ")}${gauge}${theme.muted(` ${Math.round(ratio * 100)}% of ${window}`)}`;
+	const model = theme.accent(`${row.model} · ${row.thinking}`);
+	const label = row.account?.text ?? "";
+	const right = label === "" ? "" : row.account?.warn ? theme.warning(label) : theme.muted(label);
 	const where = row.branch === undefined ? row.cwd : `${row.cwd} (${row.branch})`;
-	const left = `${theme.accent(`${row.model} · ${row.thinking}`)}${theme.muted(` · ${where} · ctx `)}${gauge}${theme.muted(` ${Math.round(ratio * 100)}% of ${window}`)}`;
-	const right =
-		row.account === undefined
-			? ""
-			: row.account.warn
-				? theme.warning(row.account.text)
-				: theme.muted(row.account.text);
-	return spread(left, right, width);
+	const separator = " · ";
+	const room =
+		width -
+		visibleWidth(model) -
+		visibleWidth(context) -
+		(right === "" ? 0 : visibleWidth(right) + 1) -
+		separator.length;
+	const folder = room >= MIN_FOLDER ? theme.muted(`${separator}${fitStart(where, room)}`) : "";
+	return spread(`${model}${folder}${context}`, right, width);
 }
 
 /** A hint row: `<key> <label>` pairs joined by ` · `. */

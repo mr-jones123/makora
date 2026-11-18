@@ -12,7 +12,7 @@ Top to bottom:
 | Top bar | `makora` · on a fork or subagent, `viewing <name> · <mode> · <branch> · esc back to main` · session title (the first prompt) · the active conversation's directory; right: session cost and time since the session started |
 | Transcript | Your messages (`›`, an attached image as a muted `[image #1 · png · 1280×800]`), the model's answers as markdown, thinking as one muted line (`∴ thinking · …`), tool calls, subagent results and messages (`↩`), notices |
 | Activity row | `◆ N running` (green when above 0) · `◌ N waiting` · `N worktrees` (the session's fork and subagent worktrees, removed ones not counted) · the active conversation's Python kernel, once a cell started one (`py running 3 vars @ cell 7 45 MB`, `py dead (exit 1)` as a warning; see [repl.md](repl.md#cells-in-the-tui)) · compaction state |
-| Status row | the active conversation's model · thinking level · directory (git branch, or a short commit in a fork's worktree) · a 20-cell context gauge with `NN% of <window>`; right: the account label |
+| Status row | the active conversation's model · thinking level · directory (git branch, or a short commit in a fork's worktree) · a 20-cell context gauge with `NN% of <window>`; right: the plan usage, or a login warning. A narrow row shortens the folder, then drops it, and keeps the gauge |
 | Attachments | Only while the draft has images: `image #1 · png · 1280×800 · 210 KB` for each ([Images](#images)) |
 | Editor | A rounded box; `/` opens command autocomplete |
 | Hint row | The main keys, read from the key bindings so remaps show (`esc back to main` instead of `esc interrupt` on a fork or subagent); shows `press ctrl+c again to exit` after a first Ctrl+C |
