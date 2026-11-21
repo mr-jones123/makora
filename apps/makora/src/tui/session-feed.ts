@@ -241,7 +241,9 @@ export class SessionFeed {
 			...(this.#local.get(undefined) ?? []),
 			...transcriptRows(this.#entries, live, (entry) => this.#local.get(entry.id) ?? []),
 			...(inbox?.items ?? []).flatMap((item): QueuedRow[] =>
-				item.mode === "write" ? [] : [{ kind: "queued", key: `queued:${item.id}`, mode: item.mode, text: inputText(item.content) }],
+				item.mode === "write"
+					? []
+					: [{ kind: "queued", key: `queued:${item.id}`, mode: item.mode, text: inputText(item.content) }],
 			),
 		];
 		const tasks = Object.values(this.#graph.tasks);

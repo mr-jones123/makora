@@ -28,13 +28,7 @@ import { imageModel, prepareImage } from "../images.ts";
 import { FAKE_MODEL } from "../models.ts";
 import { tildify } from "../paths.ts";
 import { gitBranch } from "../project.ts";
-import {
-	type MakoraSession,
-	type OpenOptions,
-	openEphemeralSession,
-	openSession,
-	type WhenBusy,
-} from "../session.ts";
+import { type MakoraSession, type OpenOptions, openEphemeralSession, openSession, type WhenBusy } from "../session.ts";
 import { createSession, latestSession, listSessions, readSession, type SessionMeta } from "../sessions.ts";
 import { discoverSkills, type Skill } from "../skills.ts";
 import { type AccountLabel, accountLabel } from "./account-label.ts";
