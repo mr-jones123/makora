@@ -88,6 +88,9 @@ export class TranscriptView implements Component {
 				case "info":
 					lines.push(...prefixed(theme.muted("· "), "  ", row.message, width, theme.muted));
 					break;
+				case "queued":
+					lines.push(...prefixed(theme.muted("› "), "  ", `${row.text} (${row.mode === "steer" ? "steering" : "queued"})`, width, theme.muted));
+					break;
 			}
 		}
 		this.#markdown = used;

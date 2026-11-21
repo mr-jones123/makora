@@ -42,6 +42,9 @@ import {
 } from "./sessions.ts";
 import { nameSession, titleOf } from "./title.ts";
 
+/** How a busy root conversation takes user input: into the running turn, or queued behind it. */
+export type WhenBusy = "steer" | "followUp";
+
 /**
  * A notice for the user about the session itself: `warning` for restored work and harness failures, `info` for news
  * such as a saved quiz.
@@ -68,11 +71,17 @@ export interface MakoraSession {
 	onNotice(listener: (notice: SessionNotice) => void): () => void;
 	/**
 	 * Submit user input (text, or text and images) to `conversation`; the session's first input becomes its title.
-	 * Returns the input's submission. A running subagent takes it as a steer. A finished one is woken by it: it queues
+	 * Returns the input's submission. A busy root takes it as `whenBusy` (default a follow-up, after the running turn).
+	 * A running subagent takes it as a steer. A finished one is woken by it: it queues
 	 * for a running slot, and its anchor submits the input once it has one and records the run, so this returns
 	 * undefined. A queued or removed one refuses it.
 	 */
-	submit(conversation: Conversation, input: UserInput, context: Context): Promise<Submission | undefined>;
+	submit(
+		conversation: Conversation,
+		input: UserInput,
+		context: Context,
+		whenBusy?: WhenBusy,
+	): Promise<Submission | undefined>;
 	/** Switch `conversation`'s model; the root's is recorded in the meta. */
 	setModel(conversation: Conversation, model: ModelRef, context: Context): Promise<void>;
 	/**
@@ -291,11 +300,11 @@ async function open(
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
-		async submit(conversation, input, submitContext) {
+		async submit(conversation, input, submitContext, whenBusy = "followUp") {
 			const self = await identityOf(harness, conversation.id, submitContext);
 			let submission: Submission | undefined;
 			if (self === undefined)
-				submission = await conversation.submit({ type: "input", content: input }, submitContext);
+				submission = await conversation.submit({ type: "input", content: input, whenBusy }, submitContext);
 			else {
 				// A subagent's input is admitted through its anchor, so the run it starts is watched and recorded.
 				const id = await harness.commit(

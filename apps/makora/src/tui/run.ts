@@ -28,7 +28,13 @@ import { imageModel, prepareImage } from "../images.ts";
 import { FAKE_MODEL } from "../models.ts";
 import { tildify } from "../paths.ts";
 import { gitBranch } from "../project.ts";
-import { type MakoraSession, type OpenOptions, openEphemeralSession, openSession } from "../session.ts";
+import {
+	type MakoraSession,
+	type OpenOptions,
+	openEphemeralSession,
+	openSession,
+	type WhenBusy,
+} from "../session.ts";
 import { createSession, latestSession, listSessions, readSession, type SessionMeta } from "../sessions.ts";
 import { discoverSkills, type Skill } from "../skills.ts";
 import { type AccountLabel, accountLabel } from "./account-label.ts";
@@ -87,6 +93,7 @@ type KeyAction = (tui: MakoraTui) => boolean;
 const APP_KEYS: readonly (readonly [MakoraKeybinding, KeyAction])[] = [
 	["app.back", (tui) => tui.backToMain()],
 	["app.interrupt", (tui) => tui.interrupt()],
+	["app.message.steer", (tui) => tui.steer()],
 	["app.exit", (tui) => tui.exitIfEmpty()],
 	["app.cancel", (tui) => tui.cancel()],
 	["app.tools.expand", (tui) => tui.dispatch({ type: "toggleExpanded" })],
@@ -154,7 +161,7 @@ class MakoraTui implements CommandHost {
 		this.dialogs = new Dialogs(this.#tui);
 		this.#editor = new RoundedEditor(this.#tui, editorTheme, { paddingX: 1 });
 		this.#editor.setAutocompleteProvider(new CombinedAutocompleteProvider(slashCommands(this.#skills), options.cwd));
-		this.#editor.onSubmit = (text) => this.#submitted(text);
+		this.#editor.onSubmit = (text) => this.#submitted(text, "followUp");
 		this.#transcript = new TranscriptView(() => ({
 			rows: this.#feed?.state.rows ?? [],
 			hasEarlier: this.#feed?.state.hasEarlier ?? false,
@@ -350,10 +357,17 @@ class MakoraTui implements CommandHost {
 		return answer;
 	}
 
-	async submit(input: UserInput): Promise<void> {
+	async submit(input: UserInput, whenBusy: WhenBusy = "followUp"): Promise<void> {
 		this.#scroll.scrollToEnd();
 		const feed = this.feed();
-		await feed.session.submit(feed.conversation, input, BACKGROUND_CONTEXT);
+		await feed.session.submit(feed.conversation, input, BACKGROUND_CONTEXT, whenBusy);
+	}
+
+	/** Send the editor's text into the running turn; with no turn running the key goes on to the editor. */
+	steer(): boolean {
+		if (this.#editor.capturesViewportInput || !this.#feed?.state.busy) return false;
+		this.#submitted(this.#editor.getText(), "steer");
+		return true;
 	}
 
 	async activate(id: ConversationId): Promise<void> {
@@ -534,7 +548,7 @@ class MakoraTui implements CommandHost {
 		return undefined;
 	}
 
-	#submitted(text: string): void {
+	#submitted(text: string, whenBusy: WhenBusy): void {
 		if (text.length === 0) return;
 		const draft = text.startsWith("/")
 			? undefined
@@ -548,7 +562,7 @@ class MakoraTui implements CommandHost {
 		this.#editor.addToHistory(text);
 		this.#setDraft("", []);
 		if (draft === undefined) this.command(text);
-		else void this.submit(draft.content).catch((error: unknown) => this.notice(String(error)));
+		else void this.submit(draft.content, whenBusy).catch((error: unknown) => this.notice(String(error)));
 	}
 
 	async #initialSession(): Promise<SessionMeta | undefined> {

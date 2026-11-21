@@ -8,12 +8,14 @@ import {
 	type ConversationView,
 	type ConversationWatch,
 	type EntryId,
+	type InboxState,
 	type LiveState,
 	type ModelRef,
 	type TaskGraph,
 	type TaskGraphWatch,
 	type TranscriptItem,
 	type UsageState,
+	type UserInput,
 } from "@earendil-works/pi-durable";
 import { AgentsDoc } from "../agents/docs.ts";
 import { identityOf } from "../agents/family.ts";
@@ -31,8 +33,16 @@ export interface LocalRow {
 	readonly message: string;
 }
 
+/** User input Durable holds in `pi.inbox` until the running turn reaches a boundary. */
+export interface QueuedRow {
+	readonly kind: "queued";
+	readonly key: string;
+	readonly mode: "steer" | "followUp";
+	readonly text: string;
+}
+
 /** A row the transcript view draws. */
-export type FeedRow = TranscriptRow | LocalRow;
+export type FeedRow = TranscriptRow | LocalRow | QueuedRow;
 
 /** Everything the main screen shows of the session, as of the last change. */
 export interface FeedState {
@@ -226,9 +236,13 @@ export class SessionFeed {
 
 	#compute(): FeedState {
 		const live = this.#view?.docs["pi.live"] as LiveState | undefined;
+		const inbox = this.#view?.docs["pi.inbox"] as InboxState | undefined;
 		const rows: FeedRow[] = [
 			...(this.#local.get(undefined) ?? []),
 			...transcriptRows(this.#entries, live, (entry) => this.#local.get(entry.id) ?? []),
+			...(inbox?.items ?? []).flatMap((item): QueuedRow[] =>
+				item.mode === "write" ? [] : [{ kind: "queued", key: `queued:${item.id}`, mode: item.mode, text: inputText(item.content) }],
+			),
 		];
 		const tasks = Object.values(this.#graph.tasks);
 		const busyConversations = new Set(
@@ -264,4 +278,11 @@ export class SessionFeed {
 		}
 		return undefined;
 	}
+}
+
+/** The text parts of a queued input, images left out. */
+function inputText(content: UserInput): string {
+	return typeof content === "string"
+		? content
+		: content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 }

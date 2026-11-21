@@ -16,6 +16,8 @@ export const MAKORA_KEYBINDINGS = {
 	"app.interrupt": { defaultKeys: "escape", description: "interrupt" },
 	// Checked before `app.interrupt`: on another agent's conversation, the key goes back to the main one.
 	"app.back": { defaultKeys: "escape", description: "back to main" },
+	// Enter queues input behind a running turn; this key sends it into the turn at its next step.
+	"app.message.steer": { defaultKeys: "alt+enter", description: "steer" },
 	"app.exit": { defaultKeys: "ctrl+d", description: "exit" },
 	"app.cancel": { defaultKeys: "ctrl+c", description: "cancel" },
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "expand cells" },
