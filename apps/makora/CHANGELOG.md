@@ -2,6 +2,12 @@
 
 Generated from conventional commits by `scripts/release-plan.mjs` in the release PR; do not edit by hand.
 
+## [0.4.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.4.0) - 2026-11-21
+
+### Features
+
+- **makora:** show queued prompts and steer the running turn with Alt+Enter ([36d0e7d](https://github.com/mr-jones123/makora/commit/36d0e7dabdb95e1e99a2d5b7f4284110b3cc5fdf))
+
 ## [0.3.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.3.0) - 2026-11-18
 
 ### Features
