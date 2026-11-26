@@ -2,8 +2,8 @@
 
 A durable, self-evolving agent harness for long-running tasks, built on [pi-durable](../../packages/durable). Built
 so far: the app skeleton, a persistent Python REPL as the model's one tool, `/diff` and `/fork`, subagents with their
-own worktrees and the agents dashboard, `/pstack` model tiers, `/quiz`, and releases with `install.sh`. See
-[the docs](../../docs/README.md): [vision](../../docs/vision.md), [roadmap](../../docs/roadmap.md) and
+own worktrees and the agents dashboard, `/pstack` model tiers, `/quiz`, `/review` with review subagents, and releases
+with `install.sh`. See [the docs](../../docs/README.md): [vision](../../docs/vision.md), [roadmap](../../docs/roadmap.md) and
 [decisions](../../docs/decisions.md).
 
 ## Install

@@ -39,6 +39,7 @@ import {
 	type TierModel,
 } from "../pstack.ts";
 import { quizRequest } from "../quiz/request.ts";
+import { reviewRequest } from "../review/request.ts";
 import { listSessions, type SessionMeta } from "../sessions.ts";
 import { type Skill, skillMessage } from "../skills.ts";
 import { updatePlan } from "../update.ts";
@@ -92,6 +93,10 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 	quiz: {
 		description: "Quiz yourself on what this session built and decided: [range | all], a page in the browser",
 		run: quiz,
+	},
+	review: {
+		description: "Review changes with review subagents: [range | #pr], the uncommitted changes by default",
+		run: review,
 	},
 	compact: {
 		description: "Compact the context, with optional instructions",
@@ -244,6 +249,18 @@ async function quiz(host: CommandHost, args: string, skills: readonly Skill[]): 
 	if (skill === undefined) return host.notice(`The ${QUIZ_SKILL} skill is missing; /quiz needs it.`);
 	const feed = host.feed();
 	const request = await quizRequest(skill, feed.state.cwd, feed.session.meta.createdAt, args);
+	if (request.kind === "refused") return host.info(request.reason);
+	host.info(request.summary);
+	await host.submit(request.text);
+}
+
+const REVIEW_SKILL = "review";
+
+/** Submit the review skill for the change `args` names (the uncommitted changes by default). */
+async function review(host: CommandHost, args: string, skills: readonly Skill[]): Promise<void> {
+	const skill = skills.find((candidate) => candidate.name === REVIEW_SKILL);
+	if (skill === undefined) return host.notice(`The ${REVIEW_SKILL} skill is missing; /review needs it.`);
+	const request = await reviewRequest(skill, host.feed().state.cwd, args);
 	if (request.kind === "refused") return host.info(request.reason);
 	host.info(request.summary);
 	await host.submit(request.text);

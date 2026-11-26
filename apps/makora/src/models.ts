@@ -54,6 +54,13 @@ export const FAKE_SCRIPTS: readonly { readonly keyword: string; readonly cells: 
 			'import json\ntry:\n    print(await quiz.publish(json.load(open("quiz-bank.json"))))\nexcept Exception as error:\n    print("quiz.publish refused:", error)',
 		],
 	},
+	// `/review`: fans out two review subagents in one cell, collects them, and prints what each handed back.
+	{
+		keyword: '<skill name="review"',
+		cells: [
+			'for name in ["slice-a", "slice-b"]:\n    await spawn(name, "review", mode="review", budget={"turns": 5})\nresults = await collect(["slice-a", "slice-b"])\nfor name, record in results.items():\n    print(name, record["state"]["kind"], record["state"]["result"]["summary"].strip()[:200])',
+		],
+	},
 	{ keyword: "crash", cells: ["import os; os._exit(1)"] },
 	{ keyword: "scribble", cells: ['await write("late.txt", "late\\n")\nimport os; os._exit(1)'] },
 	{ keyword: "edit", cells: ['print(await edit("notes.txt", "world", "there"))'] },
