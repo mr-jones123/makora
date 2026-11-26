@@ -41,8 +41,7 @@ vi.mock("openai", () => {
 
 const TEXT_MODELS = [
 	"MiniMax-M2.5",
-	"deepseek-v3.2",
-	"deepseek-v4-flash",
+	"deepseek-v4-flash-0731",
 	"deepseek-v4-pro",
 	"glm-5",
 	"glm-5.1",
@@ -74,8 +73,7 @@ const INDIVIDUAL_TEXT_MODELS = [
 const IMAGE_MODELS = ["qwen-image-2.0", "qwen-image-2.0-pro", "wan2.7-image", "wan2.7-image-pro"];
 
 const QWEN_THINKING_MODELS = [
-	"deepseek-v3.2",
-	"deepseek-v4-flash",
+	"deepseek-v4-flash-0731",
 	"deepseek-v4-pro",
 	"glm-5",
 	"glm-5.1",
@@ -106,7 +104,13 @@ const QWEN_THINKING_MODEL_CASES: QwenTokenPlanModelCase[] = [
 	...INDIVIDUAL_TEXT_MODELS.map((modelId) => ({ provider: "qwen-token-plan-individual-cn" as const, modelId })),
 ];
 
-const QWEN_REASONING_EFFORT_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro", "glm-5", "glm-5.1", "glm-5.2"] as const;
+const QWEN_REASONING_EFFORT_MODELS = [
+	"deepseek-v4-flash-0731",
+	"deepseek-v4-pro",
+	"glm-5",
+	"glm-5.1",
+	"glm-5.2",
+] as const;
 const QWEN38_MODELS = ["qwen3.8-flash", "qwen3.8-max"] as const;
 
 const QWEN_REASONING_EFFORT_MODEL_CASES: QwenTokenPlanModelCase[] = [
