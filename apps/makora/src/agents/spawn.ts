@@ -26,7 +26,8 @@ const SpawnParameters = obj({
 	base: opt(str({ description: "write: where the child's branch starts; default HEAD" })),
 	model: opt(
 		str({
-			description: '"code" or "judge" for a pstack tier, or provider/modelId; default: this conversation\'s model',
+			description:
+				'"code" or "judge" for a pstack tier, or provider/modelId (at the thinking level of a pstack role seat on it); default: this conversation\'s model',
 		}),
 	),
 	budget: opt(obj({ usd: opt(num()), minutes: opt(num()), turns: opt(int({ minimum: 1 })) })),
@@ -39,9 +40,9 @@ export type SpawnOptions = {
 	/** The cwd of a conversation whose agent sets none. */
 	readonly defaultCwd: string;
 	readonly anchor: AnchorTask;
-	/** The pstack tiers `model="code"` and `model="judge"` resolve to, read at each spawn. */
+	/** The pstack tiers and role seats `model=` resolves to, read at each spawn. */
 	readonly pstack: () => PstackConfig;
-	/** Tell the user something about the session, such as a tier that fell back to the session model. */
+	/** Tell the user something about the session, such as a tier or role seat that fell back to the session model. */
 	readonly notify: (message: string) => void;
 };
 

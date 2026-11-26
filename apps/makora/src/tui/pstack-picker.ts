@@ -1,6 +1,6 @@
 // The `/pstack` picker: the code and judge tiers' models and thinking levels, the budget, and where each pstack role
-// runs, edited in place and handed back when it closes. The model, thinking, budget and reset questions are the host's
-// dialogs over it.
+// runs (a tier, the session model, or a model of its own), edited in place and handed back when it closes. The model,
+// thinking, budget and reset questions are the host's dialogs over it.
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { type Component, getKeybindings, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -10,11 +10,13 @@ import {
 	type Budget,
 	clampThinking,
 	type KnownRole,
+	modelName,
 	PSTACK_ROLES,
 	type PstackConfig,
 	pstackConfig,
 	SEATS,
 	type Seat,
+	seatName,
 	TIERS,
 	type Tier,
 	type TierModel,
@@ -27,8 +29,11 @@ import { theme } from "./theme.ts";
 
 /** What the picker asks of the TUI. */
 export interface PickerHost {
-	/** The tier's next model and thinking level, asked in dialogs; undefined when the user cancels. */
-	chooseModel(tier: Tier, current: TierModel, budget: Budget): Promise<TierModel | undefined>;
+	/**
+	 * A model and thinking level for what `title` names (a tier or a role's seat), or the session model, asked in
+	 * dialogs; undefined when the user cancels.
+	 */
+	chooseModel(title: string, current: TierModel, budget: Budget): Promise<TierModel | undefined>;
 	chooseBudget(current: Budget): Promise<Budget | undefined>;
 	confirmReset(): Promise<boolean>;
 	/** The catalog's model of `ref`, for the thinking levels it supports. */
@@ -125,7 +130,7 @@ export class PstackPicker implements Component {
 	#change(row: PickerRow): void {
 		if (row.kind === "tier") void this.#chooseModel(row.tier);
 		else if (row.role.kind === "panel") this.#seat = 0;
-		else this.#setSeats(row.role, [nextSeat(this.#config.roles[row.role.label][0]!)]);
+		else this.#cycleSeat(row.role, 0);
 	}
 
 	async #chooseModel(tier: Tier): Promise<void> {
@@ -133,6 +138,21 @@ export class PstackPicker implements Component {
 		if (chosen === undefined) return;
 		this.#config = { ...this.#config, models: { ...this.#config.models, [tier]: chosen } };
 		this.#host.render();
+	}
+
+	/** Seat `at` of `role` takes the next seat of the cycle code, judge, session, a model (asked for), code. */
+	#cycleSeat(role: KnownRole, at: number): void {
+		const seat = this.#config.roles[role.label][at]!;
+		if (seat !== "session") {
+			this.#setSeat(role, at, typeof seat === "string" ? SEATS[SEATS.indexOf(seat) + 1]! : "code");
+			return;
+		}
+		const title = role.kind === "panel" ? `${role.label} seat ${at + 1}` : role.label;
+		void this.#host.chooseModel(title, "session", this.#config.budget).then((chosen) => {
+			if (chosen === undefined) return;
+			this.#setSeat(role, at, chosen);
+			this.#host.render();
+		});
 	}
 
 	async #budget(): Promise<void> {
@@ -155,7 +175,7 @@ export class PstackPicker implements Component {
 		const seats = this.#config.roles[role.label];
 		if (keys.matches(data, "app.pstack.previousSeat")) this.#seat = Math.max(0, at - 1);
 		else if (keys.matches(data, "app.pstack.nextSeat")) this.#seat = Math.min(seats.length - 1, at + 1);
-		else if (keys.matches(data, "tui.select.confirm")) this.#setSeats(role, seats.with(at, nextSeat(seats[at]!)));
+		else if (keys.matches(data, "tui.select.confirm")) this.#cycleSeat(role, at);
 		else if (keys.matches(data, "app.pstack.addSeat")) {
 			this.#setSeats(role, [...seats, "code"]);
 			this.#seat = seats.length;
@@ -170,6 +190,10 @@ export class PstackPicker implements Component {
 
 	#setSeats(role: KnownRole, seats: readonly Seat[]): void {
 		this.#config = { ...this.#config, roles: { ...this.#config.roles, [role.label]: seats } };
+	}
+
+	#setSeat(role: KnownRole, at: number, seat: Seat): void {
+		this.#setSeats(role, this.#config.roles[role.label].with(at, seat));
 	}
 
 	#hint(): string {
@@ -234,27 +258,31 @@ export class PstackPicker implements Component {
 				: "";
 		const thinking = `thinking ${chosen.thinking}${clamped}`;
 		const missing = this.#host.usable(chosen.model) ? "" : " · no credentials, runs on the session model";
-		const label = `${chosen.model.provider}/${chosen.model.modelId}`;
+		const label = modelName(chosen.model);
 		return `${name}${theme.text(pad(label, valueColumn(width) - TIER_COLUMN))}${theme.muted(thinking)}${theme.warning(missing)}`;
 	}
 
-	/** The role's label and its seats, with seat `editing` in brackets while the panel's seats are edited. */
+	/**
+	 * The role's label and its seats, with seat `editing` in brackets while the panel's seats are edited; a model seat is
+	 * `provider/modelId (thinking)`, flagged when its model has no credentials.
+	 */
 	#roleText(role: KnownRole, width: number, editing: number | undefined): string {
 		const seats = this.#config.roles[role.label]
-			.map((seat, index) => (index === editing ? theme.bold(theme.accent(`[${seat}]`)) : seat))
-			.join(" + ");
-		return `${theme.text(pad(role.label, valueColumn(width)))}${theme.muted(seats)}`;
+			.map((seat, index) => {
+				const text = typeof seat === "string" ? seat : `${seatName(seat)} (${seat.thinking})`;
+				const missing = typeof seat === "string" || this.#host.usable(seat.model) ? "" : " · no credentials";
+				const shown = index === editing ? theme.bold(theme.accent(`[${text}]`)) : theme.muted(text);
+				return `${shown}${theme.warning(missing)}`;
+			})
+			.join(theme.muted(" + "));
+		const column = valueColumn(width);
+		return `${theme.text(pad(role.label, column))}${truncateToWidth(seats, Math.max(1, width - column), "…")}`;
 	}
 }
 
 /** Where the values start in a row `width` columns wide. */
 function valueColumn(width: number): number {
 	return Math.max(TIER_COLUMN + 8, Math.min(VALUE_COLUMN, width - MIN_SEATS));
-}
-
-/** The seat after `seat` in the cycle code, judge, session. */
-function nextSeat(seat: Seat): Seat {
-	return SEATS[(SEATS.indexOf(seat) + 1) % SEATS.length]!;
 }
 
 /** `text` cut or padded to `width` columns, with at least one space after it. */

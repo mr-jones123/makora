@@ -94,6 +94,43 @@ describe("pstack settings", () => {
 		});
 	});
 
+	it("parse and store model seats on single and panel roles, and round-trip them", () => {
+		const stored = {
+			roles: {
+				"bug-fix": { model: "faux/faux-1", thinking: "high" },
+				"arena runners": ["judge", "code", { model: "faux/faux-2", thinking: "medium" }],
+			},
+		};
+		const { settings, warnings } = parsePstack(stored);
+		assert.deepEqual(warnings, []);
+		const config = pstackConfig(settings);
+		assert.deepEqual(config.roles["bug-fix"], [{ model: FAUX_1, thinking: "high" }]);
+		assert.deepEqual(config.roles["arena runners"], ["judge", "code", { model: FAUX_2, thinking: "medium" }]);
+		assert.deepEqual(pstackSettings(config), stored);
+	});
+
+	it("drop malformed model seats with a warning, keeping the role's default", () => {
+		const { settings, warnings } = parsePstack({
+			roles: {
+				"bug-fix": { model: "no-slash", thinking: "high" },
+				hillclimb: { model: "faux/faux-1", thinking: "loud" },
+				"arena runners": ["judge", { model: "faux/faux-1" }],
+				"perf-issue": { model: "faux/faux-1", thinking: "low" },
+			},
+		});
+		assert.equal(warnings.length, 3);
+		for (const named of ['"bug-fix"', '"hillclimb"', '"arena runners"']) {
+			assert.ok(
+				warnings.some((warning) => warning.includes(named) && warning.includes('"model"')),
+				`a warning names ${named}: ${warnings.join(" | ")}`,
+			);
+		}
+		const config = pstackConfig(settings);
+		assert.deepEqual(config.roles["bug-fix"], ["code"]);
+		assert.deepEqual(config.roles["arena runners"], ["judge", "code"]);
+		assert.deepEqual(config.roles["perf-issue"], [{ model: FAUX_1, thinking: "low" }]);
+	});
+
 	it("write the pstack block into settings.json next to the other fields, and remove it on a reset", () => {
 		const file = settingsFile({
 			snapshots: false,
@@ -144,6 +181,25 @@ describe("pstack budgets", () => {
 		});
 		models.set("faux/faux-2", plain);
 		assert.deepEqual(applyBudget(config, "large", lookup).models.judge, { model: FAUX_2, thinking: "off" });
+		const seats = applyBudget(
+			{
+				...config,
+				roles: {
+					...config.roles,
+					"bug-fix": [{ model: FAUX_1, thinking: "low" }],
+					"arena runners": ["code", { model: FAUX_2, thinking: "low" }],
+				},
+			},
+			"unlimited",
+			lookup,
+		).roles;
+		assert.deepEqual(
+			seats["bug-fix"],
+			[{ model: FAUX_1, thinking: "xhigh" }],
+			"a model seat gets the budget's level",
+		);
+		assert.deepEqual(seats["arena runners"], ["code", { model: FAUX_2, thinking: "off" }], "clamped to its model");
+		assert.deepEqual(seats["perf-issue"], ["code"]);
 		const session = applyBudget(pstackConfig(undefined), "unlimited", lookup);
 		assert.deepEqual(session.models, { code: "session", judge: "session" }, "a session tier has no level to set");
 	});
@@ -181,6 +237,26 @@ describe("pstack model aliases", () => {
 		assert.equal(spawnModel("other/model", config, lookup(true)).kind, "refused");
 		assert.equal(spawnModel("faux/", config, lookup(true)).kind, "refused");
 	});
+
+	it("give provider/modelId the thinking level of the first model seat on it, or the parent's model without credentials", () => {
+		const seated: PstackConfig = {
+			...config,
+			roles: {
+				...config.roles,
+				"bug-fix": [{ model: FAUX_1, thinking: "low" }],
+				"arena runners": ["judge", { model: FAUX_1, thinking: "high" }],
+			},
+		};
+		assert.deepEqual(spawnModel("faux/faux-1", seated, lookup(true)), {
+			kind: "model",
+			model: FAUX_1,
+			thinkingLevel: "low",
+		});
+		const fallback = spawnModel("faux/faux-1", seated, lookup(false));
+		assert.equal(fallback.kind, "parent");
+		assert.ok(fallback.kind === "parent" && fallback.notice?.includes("faux/faux-1"), "the notice names the model");
+		assert.equal(spawnModel("other/model", seated, lookup(true)).kind, "refused", "unknown models stay refused");
+	});
 });
 
 describe("pstack role lines", () => {
@@ -212,5 +288,38 @@ describe("pstack role lines", () => {
 		assert.equal(lines[3], "- no `model=`: bug-fix");
 		assert.match(lines[4]!, /architect runners \[code\];/);
 		assert.equal(lines.length, 5, "no one-model warning");
+	});
+
+	it("group single roles on a model seat by model, name panel model seats, and warn when panel seats are one model", () => {
+		const defaults = pstackConfig(undefined);
+		const seat = { model: FAUX_1, thinking: "high" } as const;
+		const text = renderPstackRoles({
+			...defaults,
+			roles: {
+				...defaults.roles,
+				"bug-fix": [seat],
+				hillclimb: [{ ...seat, thinking: "low" }],
+				"arena runners": ["judge", seat],
+			},
+		});
+		const lines = text.split("\n");
+		assert.equal(lines[3], '- `model="faux/faux-1"`: bug-fix; hillclimb');
+		assert.match(lines[4]!, /arena runners \[judge, faux\/faux-1\];/);
+		assert.equal(lines.length, 5, "a model seat beside the session tiers is a second model");
+		const oneModel = renderPstackRoles({
+			...defaults,
+			models: { code: { model: FAUX_1, thinking: "high" }, judge: { model: FAUX_2, thinking: "high" } },
+			roles: {
+				...defaults.roles,
+				"arena runners": ["code", seat],
+				"arena cross-judge pool": ["code"],
+				"architect runners": [seat],
+				"interrogate reviewers": ["code", "code"],
+			},
+		});
+		assert.equal(
+			oneModel.split("\n").at(-1),
+			"every panel seat runs on one model, so panel seats are not multi-model evidence; say so.",
+		);
 	});
 });

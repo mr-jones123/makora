@@ -32,10 +32,11 @@ import {
 	BUDGETS,
 	type Budget,
 	clampThinking,
+	modelName,
+	PSTACK_ROLES,
 	type PstackConfig,
 	pstackSettings,
 	TIERS,
-	type Tier,
 	type TierModel,
 } from "../pstack.ts";
 import { quizRequest } from "../quiz/request.ts";
@@ -387,10 +388,10 @@ async function pstack(host: CommandHost): Promise<void> {
 			new PstackPicker(
 				before,
 				{
-					chooseModel: (tier, current, budget) => chooseTierModel(host, available, tier, current, budget),
+					chooseModel: (title, current, budget) => chooseSeatModel(host, available, title, current, budget),
 					chooseBudget: async (current) => {
 						const choice = await host.dialogs.select(
-							"Budget: the thinking level of both tiers",
+							"Budget: the thinking level of both tiers and model seats",
 							Object.entries(BUDGETS).map(([budget, level]) => ({
 								value: budget,
 								label: `${budget === current ? "● " : "  "}${budget} (${level})`,
@@ -423,21 +424,25 @@ async function pstack(host: CommandHost): Promise<void> {
 		return host.info("pstack: nothing changed.");
 	}
 	settings.setPstack(config);
-	const tier = (each: Tier) => {
-		const chosen = config.models[each];
-		return `${each} ${chosen === "session" ? "session model" : `${chosen.model.provider}/${chosen.model.modelId} (${chosen.thinking})`}`;
-	};
-	host.info(`pstack saved: ${TIERS.map(tier).join(", ")}, budget ${config.budget}. New subagents use it.`);
+	const seat = (chosen: TierModel) =>
+		chosen === "session" ? "session model" : `${modelName(chosen.model)} (${chosen.thinking})`;
+	const own = PSTACK_ROLES.flatMap((role) =>
+		config.roles[role.label].flatMap((each) => (typeof each === "string" ? [] : [`${role.label} ${seat(each)}`])),
+	);
+	const roles = own.length === 0 ? "" : `; roles on their own models: ${own.join(", ")}`;
+	const tiers = TIERS.map((each) => `${each} ${seat(config.models[each])}`).join(", ");
+	host.info(`pstack saved: ${tiers}, budget ${config.budget}${roles}. New subagents use it.`);
 }
 
 /**
- * Ask for a tier's model among the session model and the models with credentials, then for its thinking level when
- * the model thinks; the budget's level, clamped to the model, is the answer when that question is cancelled.
+ * Ask for the model of what `title` names (a tier or a role's seat) among the session model and the models with
+ * credentials, then for its thinking level when the model thinks; the budget's level, clamped to the model, is the
+ * answer when that question is cancelled.
  */
-async function chooseTierModel(
+async function chooseSeatModel(
 	host: CommandHost,
 	available: readonly Model<Api>[],
-	tier: Tier,
+	title: string,
 	current: TierModel,
 	budget: Budget,
 ): Promise<TierModel | undefined> {
@@ -446,7 +451,7 @@ async function chooseTierModel(
 		label: `${current === "session" ? "● " : "  "}session model`,
 		description: "the model the spawning conversation runs on",
 	};
-	const choice = await host.dialogs.select(`${tier} model`, [
+	const choice = await host.dialogs.select(`${title} model`, [
 		session,
 		...modelItems(available, current === "session" ? undefined : current.model),
 	]);
@@ -458,7 +463,7 @@ async function chooseTierModel(
 	const levels = getSupportedThinkingLevels(model);
 	if (levels.length === 1) return { model: ref, thinking: fallback };
 	const level = await host.dialogs.select(
-		`${tier} thinking level`,
+		`${title} thinking level`,
 		levels.map((each) => ({
 			value: each,
 			label: `${each === fallback ? "● " : "  "}${each}`,
