@@ -2,6 +2,17 @@
 
 Generated from conventional commits by `scripts/release-plan.mjs` in the release PR; do not edit by hand.
 
+## [0.5.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.5.0) - 2026-11-26
+
+### Features
+
+- **makora:** pstack roles and panel seats can run on any model ([0e1cf42](https://github.com/mr-jones123/makora/commit/0e1cf422d4ae1be99fb1e4bad7c21d406835a389))
+- **makora:** /review, a code review the main model fans out to review subagents ([a1bf210](https://github.com/mr-jones123/makora/commit/a1bf210d09754aa228fbcc416805283d5fc433fa))
+
+### Fixes
+
+- **coding-agent:** move tests and defaults off models the upstream catalog dropped ([cdcd44a](https://github.com/mr-jones123/makora/commit/cdcd44a1c1eb4d7a07e6fbaa3a3f546bee9ad92d))
+
 ## [0.4.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.4.0) - 2026-11-21
 
 ### Features
