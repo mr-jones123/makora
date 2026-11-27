@@ -2,7 +2,7 @@
 
 Generated from conventional commits by `scripts/release-plan.mjs` in the release PR; do not edit by hand.
 
-## [0.5.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.5.0) - 2026-11-26
+## [0.5.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.5.0) - 2026-11-27
 
 ### Features
 
