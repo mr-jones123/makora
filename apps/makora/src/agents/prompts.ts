@@ -38,7 +38,6 @@ export function agentBrief(
 			? "Hand back your findings as your final answer. Change nothing that matters: this checkout and anything you change in it are discarded with you."
 			: "Hand back commit-ready work in your worktree and a short summary of what you changed as your final answer. makora commits what you leave uncommitted; your work reaches your parent only when it merges your branch.";
 	const limits = [
-		`${budget.turns} turns`,
 		...(budget.usd === undefined ? [] : [`$${budget.usd}`]),
 		...(budget.minutes === undefined ? [] : [`${budget.minutes} minutes`]),
 	];

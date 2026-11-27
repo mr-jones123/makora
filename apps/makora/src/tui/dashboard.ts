@@ -57,7 +57,7 @@ export type RowState = "running" | "queued" | "waiting" | "done" | "stopped";
 export type RowMode = "main" | "fork" | "write" | "review";
 
 /** Which limit a budget bar measures, and how much of it is used. */
-export type BudgetUse = { readonly limit: "usd" | "minutes" | "turns"; readonly fraction: number };
+export type BudgetUse = { readonly limit: "usd" | "minutes"; readonly fraction: number };
 
 /** One row of the list. */
 export type DashboardRow = {
@@ -171,13 +171,12 @@ export function whereOf(who: AgentKind, branch: string | undefined): string {
 	}
 }
 
-/** The limit the budget bar shows: cost when `usd` is set, else time when `minutes` is, else turns. */
-function budgetUse(record: AgentRecord, facts: AgentFacts, elapsedMs: number | undefined): BudgetUse {
+/** The limit the budget bar shows: cost when `usd` is set, else time when `minutes` is, else none. */
+function budgetUse(record: AgentRecord, facts: AgentFacts, elapsedMs: number | undefined): BudgetUse | undefined {
 	const { budget } = record;
 	if (budget.usd !== undefined) return { limit: "usd", fraction: facts.costUsd / budget.usd };
 	if (budget.minutes !== undefined)
 		return { limit: "minutes", fraction: (elapsedMs ?? 0) / (budget.minutes * 60_000) };
-	return { limit: "turns", fraction: facts.turns / budget.turns };
 }
 
 /** Cells of a budget bar. */
@@ -290,7 +289,7 @@ function kernelText(status: KernelStatus): string {
 	return `${status.state}${vars}${saved}`;
 }
 
-/** `cost`, `time` and `turns`, each `used / limit` for a subagent; used alone for the root and forks. */
+/** `cost` and `time`, each `used / limit` where a subagent has the limit, and the turns used; used alone for the root. */
 function budgetLines(row: DashboardRow, label: (name: string, value: string, paint?: Paint) => string): string[] {
 	const { facts } = row;
 	const time = row.elapsedMs === undefined ? "–" : formatElapsed(row.elapsedMs);
@@ -301,7 +300,7 @@ function budgetLines(row: DashboardRow, label: (name: string, value: string, pai
 	const of = (used: string, limit: string | undefined, over: boolean) =>
 		[used, limit ?? "no limit"].join(" / ") + (over ? " · over" : "");
 	const minutes = budget.minutes === undefined ? undefined : budget.minutes * 60_000;
-	const lines = [
+	const lines: (readonly [string, string])[] = [
 		[
 			"cost",
 			of(
@@ -318,8 +317,8 @@ function budgetLines(row: DashboardRow, label: (name: string, value: string, pai
 				minutes !== undefined && (row.elapsedMs ?? 0) > minutes,
 			),
 		],
-		["turns", of(String(facts.turns), String(budget.turns), facts.turns > budget.turns)],
-	] as const;
+		["turns", String(facts.turns)],
+	];
 	return lines.map(([name, value]) => label(name, value, value.endsWith("over") ? theme.warning : theme.text));
 }
 

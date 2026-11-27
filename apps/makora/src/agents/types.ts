@@ -4,9 +4,8 @@ import type { ConversationId, ModelRef } from "@earendil-works/pi-durable";
 /** `write`: a branch to merge back. `review`: a throwaway checkout of the commit under review. */
 export type AgentMode = "write" | "review";
 
-/** Limits a child runs under; turns always has a value, the others are optional. */
+/** Limits a child runs under; both optional, and a child with neither has no limit. */
 export type AgentBudget = {
-	readonly turns: number;
 	readonly usd?: number;
 	readonly minutes?: number;
 };
@@ -45,7 +44,7 @@ export type AgentResult =
 	| { readonly mode: "shared"; readonly summary: string };
 
 /** Why a child stopped before finishing. */
-export type StopReason = "user" | "cost" | "time" | "turns" | "error" | "parent";
+export type StopReason = "user" | "cost" | "time" | "error" | "parent";
 
 /** A child's lifecycle. */
 export type AgentState =

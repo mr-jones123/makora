@@ -68,7 +68,7 @@ function agent(conversation: number, name: string, options: AgentOptions = {}): 
 			baseRef: "HEAD",
 			...(mode === "write" ? { branch: `makora/${name}-abcdef-${conversation}` } : {}),
 		},
-		budget: options.budget ?? { turns: 50 },
+		budget: options.budget ?? {},
 		createdAt: NOW - 60_000,
 		state: options.state ?? { kind: "running" },
 	};
@@ -189,13 +189,13 @@ describe("dashboard rows", () => {
 		);
 	});
 
-	it("measure the budget bar against usd, else minutes, else turns, and none for the root", () => {
+	it("measure the budget bar against usd, else minutes, and neither for the root or a child without a budget", () => {
 		const rows = dashboardRows(
 			[
 				main({ costUsd: 5 }),
-				agent(2, "by-cost", { budget: { turns: 50, usd: 0.5, minutes: 1 }, facts: { costUsd: 0.25 } }),
-				agent(3, "by-time", { budget: { turns: 50, minutes: 4 } }),
-				agent(4, "by-turns", { facts: { turns: 10 } }),
+				agent(2, "by-cost", { budget: { usd: 0.5, minutes: 1 }, facts: { costUsd: 0.25 } }),
+				agent(3, "by-time", { budget: { minutes: 4 } }),
+				agent(4, "unlimited", { facts: { turns: 10 } }),
 			],
 			NOW,
 		);
@@ -204,7 +204,7 @@ describe("dashboard rows", () => {
 		assert.deepEqual(budgets["by-cost"], { limit: "usd", fraction: 0.5 });
 		// Started a minute before NOW and still running.
 		assert.deepEqual(budgets["by-time"], { limit: "minutes", fraction: 0.25 });
-		assert.deepEqual(budgets["by-turns"], { limit: "turns", fraction: 0.2 });
+		assert.equal(budgets.unlimited, undefined);
 	});
 
 	it("fill a 5-cell bar: none for no use, one for any use, all at or past the limit", () => {
@@ -279,7 +279,7 @@ describe("dashboard inspector", () => {
 		const writer = agent(4, "writer", {
 			mode: "write",
 			state: DONE_WRITE,
-			budget: { turns: 50, usd: 0.5 },
+			budget: { usd: 0.5 },
 			facts: { costUsd: 0.25, turns: 4, cells },
 		});
 		assert.deepEqual(lines([main(), writer], "writer", { messages }), [
@@ -290,7 +290,7 @@ describe("dashboard inspector", () => {
 			"",
 			"cost   $0.25 / $0.50",
 			"time   30s / no limit",
-			"turns  4 / 50",
+			"turns  4",
 			"",
 			"RECENT CELLS",
 			"✗ cell 2 x = open('README.md').read()",
@@ -314,7 +314,7 @@ describe("dashboard inspector", () => {
 	it("give a stopped reviewer its stop reason and flag a budget it went over", () => {
 		const halted = agent(2, "halted", {
 			state: { kind: "stopped", reason: "cost", detail: "spent $0.6000 of $0.5", at: NOW },
-			budget: { turns: 50, usd: 0.5 },
+			budget: { usd: 0.5 },
 			facts: { costUsd: 0.6 },
 		});
 		const shown = lines([main(), halted], "halted", { kernel: { state: "none", variables: 0 }, changes: undefined });

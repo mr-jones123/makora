@@ -206,9 +206,9 @@ When the child's run settles with an answer, the anchor records `done` with a re
   are for their own commits, and a failing hook or a passphrase prompt must not keep the child from finishing.
 - **shared** (outside git): the summary; the changes are already in the parent's folder.
 
-A run that ends without an answer is `stopped`: `turns` at the turn limit, `user` when aborted, `error` otherwise. A
-stopped write child's work is committed the same way, as `<name>: unfinished work (stopped: <reason>)`, so its branch
-holds everything it did.
+A run that ends without an answer is `stopped`: `cost` or `time` when it went past its budget, `user` when aborted,
+`error` otherwise. A stopped write child's work is committed the same way, as
+`<name>: unfinished work (stopped: <reason>)`, so its branch holds everything it did.
 
 The parent hears about it in one of two ways. If a `wait_agents` or `collect` call is parked on the child, the anchor
 signals it. Otherwise it gives the parent an `<agent_result name="..." state="...">` input with the summary, branch

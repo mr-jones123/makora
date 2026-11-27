@@ -499,22 +499,23 @@ describe("subagents", () => {
 		}
 	});
 
-	it("stop a child past its turns or its usd with that reason, refuse a spawn at depth 3, and queue a fifth child", async () => {
+	it("stop a child past its minutes or its usd with that reason, refuse a spawn at depth 3, and queue a fifth child", async () => {
 		const where = workspace();
 		const session = await open(where);
 		try {
+			const slow = '```python\nprint((await bash("sleep 10; echo late")).output.strip())\n```';
 			await cell(
 				session.root,
 				[
-					'await spawn("turns", "python", mode="review", budget={"turns": 1})',
+					`await spawn("timed", ${JSON.stringify(slow)}, mode="review", budget={"minutes": 0.02})`,
 					'await spawn("money", "python", mode="review", budget={"usd": 0.0001})',
 					'await spawn("nester", "nest", mode="review")',
 				].join("\n"),
 			);
-			const done = await settled(session, session.root, ["turns", "money", "nester"]);
-			assert.deepEqual(done.turns?.state.kind === "stopped" && [done.turns.state.reason, done.turns.state.detail], [
-				"turns",
-				"the turn budget ran out",
+			const done = await settled(session, session.root, ["timed", "money", "nester"]);
+			assert.deepEqual(done.timed?.state.kind === "stopped" && [done.timed.state.reason, done.timed.state.detail], [
+				"time",
+				"0.02 minutes passed",
 			]);
 			assert.ok(
 				done.money?.state.kind === "stopped" && done.money.state.reason === "cost",
@@ -527,19 +528,19 @@ describe("subagents", () => {
 			);
 			assert.equal(cells.length, 1, "no request after the round that went over");
 
-			// A child stopped for cost takes no more input; one stopped for turns only from its parent or the user.
+			// A child stopped for cost takes no more input; one stopped for time only from its parent or the user.
 			assert.match(
 				await cell(session.root, guarded('print(await send("money", "carry on"))')),
 				/error: money was stopped for cost/,
 			);
-			const turns = (await session.harness.conversation(done.turns!.conversationId, context))!;
-			const turnsSelf = await identityOf(session.harness, turns.id, context);
+			const timed = (await session.harness.conversation(done.timed!.conversationId, context))!;
+			const timedSelf = await identityOf(session.harness, timed.id, context);
 			await assert.rejects(
 				session.harness.commit(
 					(tx) =>
 						admitInput(
 							tx,
-							{ handle: turns, self: turnsSelf },
+							{ handle: timed, self: timedSelf },
 							{ content: "from a sibling", requestId: "sibling-wake", from: "sibling" },
 							"steer",
 						),
@@ -548,10 +549,10 @@ describe("subagents", () => {
 				(error) => error instanceof AgentUnreachable && /only its parent or the user/.test(error.message),
 			);
 			assert.match(
-				await cell(session.root, 'print(await send("turns", "one more turn"))'),
-				/'to': 'turns', 'status': 'delivered'/,
+				await cell(session.root, 'print(await send("timed", "one more turn"))'),
+				/'to': 'timed', 'status': 'delivered'/,
 			);
-			await settled(session, session.root, ["turns"]);
+			await settled(session, session.root, ["timed"]);
 
 			const nester = done.nester!;
 			assert.equal(nester.state.kind, "done");

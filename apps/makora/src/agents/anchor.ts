@@ -338,7 +338,6 @@ async function queueWoken(task: Task, runtime: Runtime, round: number, context: 
 function finalOf(settled: SettledSubmissionRecord): Final {
 	if (settled.status === "done" && settled.type === "input") return { kind: "done", answer: settled.answer };
 	const reason = settled.status === "unanswered" ? settled.reason : "unanswered";
-	if (reason === "turn_limit") return { kind: "stopped", reason: "turns", detail: "the turn budget ran out" };
 	if (reason === "aborted") return { kind: "stopped", reason: "user", detail: "aborted" };
 	return { kind: "stopped", reason: "error", detail: reason };
 }

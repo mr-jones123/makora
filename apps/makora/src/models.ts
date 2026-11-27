@@ -58,7 +58,7 @@ export const FAKE_SCRIPTS: readonly { readonly keyword: string; readonly cells: 
 	{
 		keyword: '<skill name="review"',
 		cells: [
-			'for name in ["slice-a", "slice-b"]:\n    await spawn(name, "review", mode="review", budget={"turns": 5})\nresults = await collect(["slice-a", "slice-b"])\nfor name, record in results.items():\n    print(name, record["state"]["kind"], record["state"]["result"]["summary"].strip()[:200])',
+			'for name in ["slice-a", "slice-b"]:\n    await spawn(name, "review", mode="review", budget={"minutes": 5})\nresults = await collect(["slice-a", "slice-b"])\nfor name, record in results.items():\n    print(name, record["state"]["kind"], record["state"]["result"]["summary"].strip()[:200])',
 		],
 	},
 	{ keyword: "crash", cells: ["import os; os._exit(1)"] },

@@ -148,8 +148,8 @@ export async function admitInput(
 
 /**
  * Why finished child `record` must not be woken by an input from `from`, or undefined. A child stopped for cost, or one
- * that spent its budget, stays stopped: a wake would spend more. One stopped for turns or time wakes only for its parent
- * or the user, who decide that it may go on.
+ * that spent its budget, stays stopped: a wake would spend more. One stopped for time wakes only for its parent or the
+ * user, who decide that it may go on.
  */
 async function wakeRefusal(tx: Tx, record: AgentRecord, from: AgentInput["from"]): Promise<string | undefined> {
 	const { name, state, budget } = record;
@@ -163,7 +163,7 @@ async function wakeRefusal(tx: Tx, record: AgentRecord, from: AgentInput["from"]
 			return `${name} spent $${spent.toFixed(4)} of its $${budget.usd} budget and takes no more input`;
 		}
 	}
-	const limited = state.kind === "stopped" && (state.reason === "turns" || state.reason === "time");
+	const limited = state.kind === "stopped" && state.reason === "time";
 	if (limited && from !== "parent" && from !== "user") {
 		return `${name} was stopped for ${state.reason}; only its parent or the user can wake it`;
 	}
