@@ -2,6 +2,12 @@
 
 Generated from conventional commits by `scripts/release-plan.mjs` in the release PR; do not edit by hand.
 
+## [0.5.1](https://github.com/mr-jones123/makora/releases/tag/makora-v0.5.1) - 2026-11-27
+
+### Fixes
+
+- **makora:** subagents run without a turn budget ([3b23b5e](https://github.com/mr-jones123/makora/commit/3b23b5efbe0834b7b38c91ef5bdf0ad59e757b74))
+
 ## [0.5.0](https://github.com/mr-jones123/makora/releases/tag/makora-v0.5.0) - 2026-11-27
 
 ### Features
