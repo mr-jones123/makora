@@ -25,7 +25,7 @@ The user wants a code review. You orchestrate it: you split the change into slic
 3. **Fan out in one cell.** Do the whole fan-out in one dedicated `python` cell, so the slices, the briefs and the results stay together in one recorded step:
    - Split the diff into slices: one per area (a package, a module, or a group of files that change together), plus cross-cutting slices: `correctness and edge cases`, `contracts with callers` and `tests`. Use 2 to 6 slices; a small change gets one area slice and the three cross-cutting ones.
    - Models: area slices run on `model="code"`. Cross-cutting slices take the seats of the `interrogate reviewers` panel in the `pstack roles:` lines of your prompt, in order and cycling, each seat's `model=`, and no `model=` for a session seat. When those lines say code and judge are one model, say in the report that the panel was one model.
-   - Spawn one `mode="review"` child per slice with a budget such as `{"usd": 2, "minutes": 20, "turns": 40}`. For a range or a fetched PR, pass `ref=` the commit under review, so the child's checkout holds the changed code. For uncommitted changes and unfetched PRs, a review checkout is detached at `HEAD` and lacks the change, so the brief carries the diff text (and untracked files' contents) and tells the child to apply it with `git apply` in its checkout. A brief that would pass about 100,000 characters carries its slice's part of the diff and the full file list.
+   - Spawn one `mode="review"` child per slice with a budget such as `{"usd": 2, "minutes": 20}`. For a range or a fetched PR, pass `ref=` the commit under review, so the child's checkout holds the changed code. For uncommitted changes and unfetched PRs, a review checkout is detached at `HEAD` and lacks the change, so the brief carries the diff text (and untracked files' contents) and tells the child to apply it with `git apply` in its checkout. A brief that would pass about 100,000 characters carries its slice's part of the diff and the full file list.
    - Then `results = await collect(names)` in the same cell, and print a compact summary: per child, its state and the first lines of its answer.
 
    A sketch:
@@ -36,7 +36,7 @@ The user wants a code review. You orchestrate it: you split the change into slic
    plan = {"area-session": (["src/session.ts", "src/sessions.ts"], "the session area", "code"), ...}
    for name, (paths, focus, model) in plan.items():
        await spawn(name, brief(paths, focus), mode="review", model=model,
-                   budget={"usd": 2, "minutes": 20, "turns": 40})
+                   budget={"usd": 2, "minutes": 20})
    results = await collect(list(plan))
    for name, record in results.items():
        state = record["state"]

@@ -1,7 +1,7 @@
 // The `spawn` tool behind `await spawn(...)` in a cell: creates a child, its anchor and its record in one commit, or
 // returns the child of that name when it exists, so calling it again (after a crash, or by mistake) never duplicates.
 import { configure, defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
-import { int, num, obj, oneOf, opt, str, unknown } from "@earendil-works/pi-schema";
+import { num, obj, oneOf, opt, str, unknown } from "@earendil-works/pi-schema";
 import { type PstackConfig, spawnModel } from "../pstack.ts";
 import type { AnchorTask } from "./anchor.ts";
 import { AgentSelfDoc, AgentsDoc, SELF_KEY } from "./docs.ts";
@@ -11,8 +11,6 @@ import { locateAgent, placeAgent, type WorktreeRoots } from "./worktree.ts";
 
 /** A child of the root has depth 1; a child at this depth may not spawn. */
 const MAX_DEPTH = 2;
-
-const DEFAULT_TURNS = 50;
 
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // Names `send` reads as addresses, not as children.
@@ -30,7 +28,7 @@ const SpawnParameters = obj({
 				'"code" or "judge" for a pstack tier, or provider/modelId (at the thinking level of a pstack role seat on it); default: this conversation\'s model',
 		}),
 	),
-	budget: opt(obj({ usd: opt(num()), minutes: opt(num()), turns: opt(int({ minimum: 1 })) })),
+	budget: opt(obj({ usd: opt(num()), minutes: opt(num()) })),
 });
 
 /** What `spawn` runs on. */
@@ -87,7 +85,6 @@ export function createSpawnTool(options: SpawnOptions): ToolRegistration<typeof 
 				options.roots(),
 			);
 			const budget: AgentBudget = {
-				turns: args.budget?.turns ?? DEFAULT_TURNS,
 				...(args.budget?.usd === undefined ? {} : { usd: args.budget.usd }),
 				...(args.budget?.minutes === undefined ? {} : { minutes: args.budget.minutes }),
 			};
@@ -106,7 +103,6 @@ export function createSpawnTool(options: SpawnOptions): ToolRegistration<typeof 
 				const worktree = locateAgent(placement, mode, args.name, options.sessionId, child.id);
 				await configure(tx, child.id, {
 					cwd: worktree.cwd,
-					maxTurns: budget.turns,
 					...(model === undefined ? {} : { model }),
 					...(thinkingLevel === undefined ? {} : { thinkingLevel }),
 					...(depth < MAX_DEPTH ? {} : { tools: { remove: [tool] } }),

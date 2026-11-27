@@ -75,23 +75,22 @@ write child hands back its summary, its branch head and a diff stat. A stopped c
 
 ## Budgets
 
-`budget={"usd": ..., "minutes": ..., "turns": ...}` sets limits. Each is optional, and `turns` defaults to 50.
+`budget={"usd": ..., "minutes": ...}` sets limits. Each is optional, and a child with neither has no limit.
 
 | Limit | When it is reached |
 | --- | --- |
 | `usd` | Spend is checked after each tool round; past the budget the child stops with `cost` |
 | `minutes` | The child stops with `time` |
-| `turns` | The run ends and the child stops with `turns` |
 
 A stopped child keeps its budget when something wakes it:
 
 - **Cost.** A child stopped for `cost`, or one whose spend has reached its `usd`, takes no more input. A message or
   typed text to it is refused with an error, because each wake spends at least one more model request.
-- **Turns and time.** A child stopped for `turns` or `time` wakes only for its parent or for you typing into it. Its
-  parent or you decide that it may go on; a sibling's message is refused.
+- **Time.** A child stopped for `time` wakes only for its parent or for you typing into it. Its parent or you decide
+  that it may go on; a sibling's message is refused.
 
-Every run of a child, the first and each one a message or your typing starts, gets the whole of its `minutes` and a
-fresh `turns` count. Spend in `usd` counts every run together.
+Every run of a child, the first and each one a message or your typing starts, gets the whole of its `minutes`. Spend in
+`usd` counts every run together.
 
 At most 4 children run at once per session (`agents.maxRunning` in `settings.json`). Others wait as `queued`, and so
 does a finished child woken by a message or by your typing: it runs once a slot frees up. A child may spawn children of

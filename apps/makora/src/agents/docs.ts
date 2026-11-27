@@ -154,7 +154,7 @@ export const AgentWake = defineSignal({
 	]),
 });
 
-const STOP_REASONS = ["user", "cost", "time", "turns", "error", "parent"] as const satisfies readonly StopReason[];
+const STOP_REASONS = ["user", "cost", "time", "error", "parent"] as const satisfies readonly StopReason[];
 
 /** Tells an anchor to stop its child, with the reason and what happened, that the child was removed, or that an input woke it. */
 export const AgentControl = defineSignal({

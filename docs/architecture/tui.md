@@ -146,8 +146,8 @@ newest 200 entries, which give the turn count, the time of the first and last en
 - Rows are ordered by section, then depth first through the ownership tree (a subagent's parent, a fork's original).
   A row is indented once for each ancestor listed in the same section, so a child whose parent is in another section
   starts at the left edge.
-- The budget bar measures `usd`, else `minutes` (time worked), else `turns`. Any use fills one of its 5 cells; a spent
-  budget fills all five in the warning color.
+- The budget bar measures `usd`, else `minutes` (time worked); a child with neither has none. Any use fills one of its
+  5 cells; a spent budget fills all five in the warning color.
 
 `inspectorLines` draws the selected row. The kernel line comes from `session.kernels.status`. The worktree's changes
 are read only for the selected subagent, after each load and on each move: `filesSince` against the base commit in its
